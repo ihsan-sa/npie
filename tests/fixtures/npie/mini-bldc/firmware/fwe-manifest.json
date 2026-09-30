@@ -1,0 +1,108 @@
+{
+ "schema": "fwe-manifest/1",
+ "board": "mini",
+ "version": "0.1.0",
+ "stage": "bringup",
+ "artifact": {
+  "elf": "build/fw.elf",
+  "sha256": {
+   "elf": "0000000000000000000000000000000000000000000000000000000000000000"
+  }
+ },
+ "flash": {
+  "interface": "swd",
+  "connector": "J1",
+  "commands": {
+   "probe-rs": [
+    "probe-rs",
+    "download",
+    "--chip",
+    "X",
+    "{elf}"
+   ]
+  }
+ },
+ "uart": {
+  "connector": "J2",
+  "tx_pin": "3",
+  "rx_pin": "4",
+  "baud": 115200,
+  "format": "8N1",
+  "levels": "3V3",
+  "banner_regex": "^fwe mini "
+ },
+ "commands": [
+  {
+   "name": "version",
+   "args": "",
+   "reply": "OK {json}",
+   "safe": true
+  },
+  {
+   "name": "status",
+   "args": "",
+   "reply": "OK {json}",
+   "safe": true,
+   "reply_fields": [
+    "armed",
+    "faults",
+    "vbus_v",
+    "i_a",
+    "duty"
+   ]
+  },
+  {
+   "name": "selftest",
+   "args": "",
+   "reply": "OK {json}",
+   "safe": true
+  },
+  {
+   "name": "arm",
+   "args": "",
+   "reply": "OK {json}",
+   "safe": false
+  },
+  {
+   "name": "duty",
+   "args": "",
+   "reply": "OK {json}",
+   "safe": false
+  },
+  {
+   "name": "disarm",
+   "args": "",
+   "reply": "OK {json}",
+   "safe": true
+  },
+  {
+   "name": "clear",
+   "args": "",
+   "reply": "OK {json}",
+   "safe": true
+  }
+ ],
+ "test_hooks": [
+  {
+   "name": "selftest",
+   "send": "selftest",
+   "expect": "^OK ",
+   "timeout_s": 5,
+   "needs": [
+    "+3V3"
+   ]
+  }
+ ],
+ "safety": {
+  "pwm_at_reset": "off",
+  "i_trip_a": 10.0,
+  "vbus_ov_v": 30.0,
+  "vbus_uv_v": 7.0,
+  "fault_clear": "clear",
+  "pwm_hz": 20000
+ },
+ "verified": {
+  "build": true,
+  "hardware": false
+ }
+}
