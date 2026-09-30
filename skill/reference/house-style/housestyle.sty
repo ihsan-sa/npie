@@ -1,0 +1,574 @@
+% housestyle.sty - house style for technical documents
+% Implements the spec in style-spec.md. Compile with LuaLaTeX (fontspec).
+% Fonts: Source Serif 4 (Text, Subhead and Display optical sizes) and IBM Plex
+% Mono are vendored as .otf files in the skill's assets/fonts/ (two levels up
+% from this file), found from this file's own location, so nothing needs
+% installing. Set \hsfontdir (with a trailing /) before \usepackage{housestyle}
+% to load them from somewhere else.
+%
+% v5 (23 September 2026): labels are no longer mono capitals. Every label,
+% running head, eyebrow and figure number is set in the text serif's own small
+% caps, and a label of the form "Figure 2 / what it shows" splits into a
+% small-caps number and an italic title. Mono is kept for code, URLs and paths
+% only. Every command name and argument is unchanged; see CHANGES.md.
+\NeedsTeXFormat{LaTeX2e}
+\ProvidesPackage{housestyle}[2026/09/23 v5.1 technical document house style]
+
+\RequirePackage{iftex}
+% Paper is letter unless the document sets \hspaper first. For A4,
+% \newcommand\hspaper{a4paper} before \usepackage{housestyle}; margins unchanged.
+\providecommand\hspaper{letterpaper}
+\RequirePackage[\hspaper,top=92pt,bottom=70pt,left=90pt,right=90pt,%
+  headheight=10pt,headsep=45pt,footskip=32pt]{geometry}
+% v5.1 (23 September 2026): 90 pt sides and one measure for everything --
+% 415 pt on A4, 432 pt on Letter. The running head's baseline sits 47 pt from
+% the top edge and the text block starts at 92 pt, so a heading at the top of a
+% page has room under the head rule.
+
+\RequirePackage{fontspec}
+\RequirePackage{xcolor}
+\RequirePackage{fancyhdr}
+% newparttoc: without it titlesec writes a Part's contents line as
+% "1\hspace{1em}Title", which titletoc cannot split, so the Part entry lost
+% its small-caps "Part 1" column and printed the bare number.
+\RequirePackage[newparttoc]{titlesec}
+\RequirePackage{titletoc}
+\RequirePackage{booktabs}
+\RequirePackage{array}
+\RequirePackage{colortbl}
+\RequirePackage{graphicx}
+\RequirePackage{caption}
+\RequirePackage{enumitem}
+\RequirePackage{tikz}
+\RequirePackage{amsmath}
+\RequirePackage{microtype}
+% linktoc=none: hyperref's own per-entry link (title words only) is turned
+% off here so the contents block below can wrap the whole line -- label,
+% title and page number -- in one link instead (\Hy@tocdestname holds the
+% anchor \contentsline's 4th argument carries either way).
+\RequirePackage[hidelinks,linktoc=none]{hyperref}
+\RequirePackage{xurl} % URLs break at any character, never hyphenate mid-word
+\usetikzlibrary{positioning,arrows.meta,calc}
+
+% ---- colour -----------------------------------------------------------------
+\definecolor{ink}{HTML}{15140F}
+\definecolor{inkseventy}{HTML}{4A4740}
+% v5: 8A857A -> 77716A. Labels are now serif small caps, lighter on the page
+% than mono capitals were, so the grey is one step darker to keep them at
+% about 4.5:1 on the paper.
+\definecolor{inkfiftyfive}{HTML}{77716A}
+\definecolor{paper}{HTML}{FAF8F3}
+\definecolor{fill}{HTML}{F0EADE}
+\definecolor{codefill}{HTML}{F2EEE3}
+\definecolor{accent}{HTML}{9C4221}
+\definecolor{rulegrey}{HTML}{DED8CA}
+\pagecolor{paper}\color{ink}
+
+% ---- type -------------------------------------------------------------------
+\ifluatex\else
+  \PackageError{housestyle}{Compile with lualatex}{housestyle.sty loads its
+    fonts with fontspec and finds them with Lua; pdflatex cannot do either.}
+\fi
+\ifdefined\hsfontdir\else
+  \edef\hsfontdir{\directlua{
+    local p = kpse.find_file("housestyle.sty", "tex") or "housestyle.sty"
+    while p:sub(1, 2) == "./" do p = p:sub(3) end
+    local d = p:match("^(.*)/[^/]*$")
+    if d == nil then d = lfs.currentdir()
+    elseif p:sub(1, 1) == "/" then
+    else d = lfs.currentdir() .. "/" .. d end
+    tex.sprint(-2, (d:gsub("/[^/]+/[^/]+/?$", "")) .. "/assets/fonts/")}}
+\fi
+% One family, four jobs:
+%   \rmfamily        Source Serif 4 Text: prose, captions, tables, maths text
+%   \hssubheadfont   Source Serif 4 Subhead: section and part headings, claim
+%   \hsdisplayfont   Source Serif 4 Display: the document title
+%   \statfont        Source Serif 4 Display, lining tabular figures
+%   \labelfont       Source Serif 4 Text in all small caps, +5% tracking
+%   \hs@eyebrowfont  the same in Semibold, for the 8.5 pt eyebrow in a node
+%   \hs@notefont     Source Serif 4 Text with TeX ligatures off, so a
+%                    provenance line keeps "--state" as typed
+%   \ttfamily        IBM Plex Mono, for code, URLs and paths only
+\IfFileExists{\hsfontdir SourceSerif4-Semibold.otf}{%
+  \setmainfont{SourceSerif4}[Path=\hsfontdir,Extension=.otf,
+    UprightFont=*-Regular,ItalicFont=*-It,
+    BoldFont=*-Semibold,BoldItalicFont=*-SemiboldIt,
+    Numbers={Proportional,Lining}]
+  \newfontfamily\hssubheadfont{SourceSerif4Subhead}[Path=\hsfontdir,
+    Extension=.otf,UprightFont=*-Regular,ItalicFont=SourceSerif4-It,
+    Numbers={Proportional,Lining}]
+  \newfontfamily\hsdisplayfont{SourceSerif4Display}[Path=\hsfontdir,
+    Extension=.otf,UprightFont=*-Regular,ItalicFont=SourceSerif4-It,
+    Numbers={Proportional,Lining}]
+  \newfontfamily\statfont{SourceSerif4Display}[Path=\hsfontdir,
+    Extension=.otf,UprightFont=*-Regular,Numbers={Lining,Tabular}]
+  \newfontfamily\labelfont{SourceSerif4}[Path=\hsfontdir,Extension=.otf,
+    UprightFont=*-Regular,BoldFont=*-Semibold,
+    Letters={SmallCaps,UppercaseSmallCaps},Numbers={Lining,Proportional},
+    LetterSpace=5.0]
+  \newfontfamily\hs@eyebrowfont{SourceSerif4}[Path=\hsfontdir,Extension=.otf,
+    UprightFont=*-Semibold,
+    Letters={SmallCaps,UppercaseSmallCaps},Numbers=Lining,LetterSpace=6.0]
+  \newfontfamily\hs@runfont{SourceSerif4}[Path=\hsfontdir,Extension=.otf,
+    UprightFont=*-Regular,
+    Letters={SmallCaps,UppercaseSmallCaps},Numbers=Lining,LetterSpace=9.0]
+  \newfontfamily\hs@notefont{SourceSerif4}[Path=\hsfontdir,Extension=.otf,
+    UprightFont=*-Regular,ItalicFont=*-It,Ligatures=TeXOff,
+    Numbers={Lining,Proportional}]
+  \newfontfamily\hs@figfont{SourceSerif4}[Path=\hsfontdir,Extension=.otf,
+    UprightFont=*-Regular,Numbers={Lining,Tabular}]
+  \setmonofont{IBMPlexMono}[Path=\hsfontdir,Extension=.otf,
+    UprightFont=*-Regular,BoldFont=*-Medium,Scale=0.86]
+}{% not vendored here: fall back to the faces installed on the system
+  \setmainfont{Source Serif 4}[Numbers={Proportional,Lining}]
+  \newfontfamily\hssubheadfont{Source Serif 4 Subhead}[Numbers={Proportional,Lining}]
+  \newfontfamily\hsdisplayfont{Source Serif 4 Display}[Numbers={Proportional,Lining}]
+  \newfontfamily\statfont{Source Serif 4 Display}[Numbers={Lining,Tabular}]
+  \newfontfamily\labelfont{Source Serif 4}[
+    Letters={SmallCaps,UppercaseSmallCaps},Numbers={Lining,Proportional},
+    LetterSpace=5.0]
+  \newfontfamily\hs@eyebrowfont{Source Serif 4 Semibold}[
+    Letters={SmallCaps,UppercaseSmallCaps},Numbers=Lining,LetterSpace=6.0]
+  \newfontfamily\hs@runfont{Source Serif 4}[
+    Letters={SmallCaps,UppercaseSmallCaps},Numbers=Lining,LetterSpace=9.0]
+  \newfontfamily\hs@notefont{Source Serif 4}[Ligatures=TeXOff,
+    Numbers={Lining,Proportional}]
+  \newfontfamily\hs@figfont{Source Serif 4}[Numbers={Lining,Tabular}]
+  \setmonofont{IBM Plex Mono}[Scale=0.86]
+}
+
+\renewcommand{\normalsize}{\fontsize{10.5pt}{16pt}\selectfont}
+\normalsize
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{8pt}
+% Prose runs the full measure, the same width as the rules, figures, tables and
+% stat rows (v5.1; before, it stopped 48 pt short and the page looked as if it
+% ended early on the right). Ranged left by default. \hsjustified in the
+% preamble, or \usepackage[justified]{housestyle}, justifies it instead: see
+% style-spec.md, "Alignment", for which documents take which. Lead lines,
+% captions, legends, labels and anything in a box of its own stay ranged left
+% either way. \hsprosegap is kept for old documents and is 0.
+\newlength{\hsprosegap}\setlength{\hsprosegap}{0pt}
+\newif\ifhs@justified
+% \dimexpr: \hsprosegap is a skip, and "\rightskip=\hsprosegap plus 3em"
+% assigns the whole register and then prints "plus 3em" on the page.
+\newcommand{\hs@ragged}{\rightskip=\dimexpr\hsprosegap\relax plus 3em\relax
+  \hyphenpenalty=1000\exhyphenpenalty=1000}
+\newcommand{\hs@justify}{\rightskip=\dimexpr\hsprosegap\relax\relax
+  \hyphenpenalty=200\exhyphenpenalty=200\emergencystretch=1.5em}
+\newcommand{\hsprose}{\ifhs@justified\hs@justify\else\hs@ragged\fi}
+\newcommand{\hsjustified}{\hs@justifiedtrue\hsprose}
+\newcommand{\hsragged}{\hs@justifiedfalse\hsprose}
+\DeclareOption{justified}{\hs@justifiedtrue}
+% [nodiagramkit]: do not load hsdiagrams.sty. For a document whose figures all
+% come from diagram-maker; the hs* TikZ styles are then undefined.
+\newif\ifhs@diagramkit\hs@diagramkittrue
+\DeclareOption{nodiagramkit}{\hs@diagramkitfalse}
+\ProcessOptions\relax
+% Anything set inside a box of its own -- a stat caption, a callout, a diagram
+% node -- is already narrow, so it ranges left at its own full width.
+\newcommand{\hsfull}{\rightskip=0pt plus 1fil}
+\AtBeginDocument{\hsprose}
+% A rule is a block, not prose, so it spans the whole measure and not the 34-em
+% one. Each ends its own paragraph inside a group, which is what puts \rightskip
+% back afterwards.
+\newcommand{\hsrule}{{\hsfull\textcolor{ink}{\rule{\linewidth}{0.75pt}}\par}}
+\newcommand{\hsthinrule}{{\hsfull\textcolor{rulegrey}{\rule{\linewidth}{0.75pt}}\par}}
+
+% ---- labels -----------------------------------------------------------------
+% \leavevmode first: a label that opens a [t] minipage (the callout) would
+% otherwise put its colour special on the vertical list ahead of the line, and
+% the minipage would align on that instead of on the label's baseline.
+% \hslabel{text}, \hsaccentlabel{text}: all small caps at 8.5 pt, +5%
+% tracking, in ink-55 or the accent. Whatever case the text is written in, it
+% comes out as small caps, so "INPUT", "Input" and "input" all look the same.
+% A label with a " / " in it splits at the first one: the part before it (the
+% number, "Figure 2") stays in small caps, and the part after it (the title) is
+% set in the text italic in ink-70. So
+%   \hslabel{Figure 2 / what a change goes through before it merges}
+% reads as a book's figure label rather than a line of machine output. The
+% spaces matter: under \ExplSyntaxOn a bare "/" would also split "Pass/fail",
+% so the match is written "~/~", which is a real space, slash, space.
+\ExplSyntaxOn
+\cs_new_protected:Npn \hs_label:nn #1#2
+  {
+    \leavevmode
+    \group_begin:
+      \labelfont \fontsize{8.5pt}{12pt} \selectfont
+      \tl_if_in:nnTF {#2} { ~/~ }
+        { \__hs_label_split:nw {#1} #2 \q_stop }
+        { \color{#1} #2 }
+    \group_end:
+  }
+\cs_new_protected:Npn \__hs_label_split:nw #1#2 ~/~ #3 \q_stop
+  {
+    { \color{#1} \tl_trim_spaces:n {#2} }
+    \hspace{0.6em}
+    { \rmfamily \itshape \fontsize{9.5pt}{12pt} \selectfont \color{inkseventy}
+      \tl_trim_spaces:n {#3} }
+  }
+\NewDocumentCommand \hslabel { m } { \hs_label:nn { inkfiftyfive } {#1} }
+\NewDocumentCommand \hsaccentlabel { m } { \hs_label:nn { accent } {#1} }
+\ExplSyntaxOff
+
+% ---- running head and foot --------------------------------------------------
+\newcommand{\hsslug}[1]{\def\@hsslug{#1}}\hsslug{}
+\newcommand{\hssection}[1]{\def\@hssection{#1}}\hssection{}
+% Same, but global: a block that sets the running head from inside its own
+% group (the sources list, block 8) needs the value to survive the group and
+% reach the output routine, which runs long after \end{hssources}.
+\newcommand{\hsgsection}[1]{\gdef\@hssection{#1}}
+% \hsrunlabel{text}: the running head's and foot's face, 8 pt small caps at
+% +9%, ink-55. New in v5.1; a document's copyright foot uses it.
+\newcommand{\hsrunlabel}[1]{{\hs@runfont\fontsize{8pt}{10pt}\selectfont
+  \color{inkfiftyfive}#1}}
+\pagestyle{fancy}\fancyhf{}
+\renewcommand{\headrulewidth}{0.5pt}
+\renewcommand{\headrule}{\vskip 4pt\textcolor{rulegrey}{\rule{\headwidth}{0.5pt}}}
+\fancyhead[L]{\hsrunlabel{\@hsslug}}
+\fancyhead[R]{\hsrunlabel{\@hssection}}
+% The slug prints in the running head already. This slot stays empty unless a
+% document puts its copyright line here.
+\fancyfoot[L]{}
+\fancyfoot[R]{\hsrunlabel{\thepage}}
+% Spec: running head on every page but the first. The first page keeps the foot.
+\fancypagestyle{hsfirst}{\fancyhead{}\renewcommand{\headrule}{}}
+% A dedicated title page is framed by two ink rules: the slug and the date
+% above the top one, the copyright line (the foot's left slot) under the
+% bottom one, and no page number. New in v5.
+%   \thispagestyle{hstitlepage}
+\newcommand{\hsdate}[1]{\def\@hsdate{#1}}
+\hsdate{\hs@monthyear}
+\newcommand{\hs@monthyear}{\ifcase\month\or January\or February\or March\or
+  April\or May\or June\or July\or August\or September\or October\or
+  November\or December\fi\space\number\year}
+\fancypagestyle{hstitlepage}{%
+  \fancyhead[L]{\hsrunlabel{\@hsslug}}\fancyhead[R]{\hsrunlabel{\@hsdate}}%
+  \fancyfoot[R]{}%
+  \renewcommand{\headrule}{\vskip 4pt\textcolor{ink}{\rule{\headwidth}{0.75pt}}}%
+  \renewcommand{\footrulewidth}{0.75pt}%
+  \renewcommand{\footrule}{\textcolor{ink}{\rule{\headwidth}{0.75pt}}}}
+\AtBeginDocument{\thispagestyle{hsfirst}}
+% The document number. A finished build defines \docstamp (the number, a
+% middle dot and its date: "PPP-NNNN-R", "24 Sep 2026") before the document
+% starts: scripts/build.sh takes it from the register. Every page, title page
+% included, then prints it 7 pt in ink-55 at the foot's left edge, one line
+% under the foot's baseline, so a copyright line in the left slot and the page
+% number keep their places.
+% A draft leaves \docstamp undefined and nothing prints.
+\AddToHook{shipout/foreground}{\ifdefined\docstamp
+  \put(\dimexpr 1in+\hoffset+\oddsidemargin\relax,
+       -\dimexpr 1in+\voffset+\topmargin+\headheight+\headsep+\textheight
+         +\footskip+11pt\relax)
+    {\hs@figfont\fontsize{7pt}{8pt}\selectfont\color{inkfiftyfive}\docstamp}\fi}
+
+% ---- headings ---------------------------------------------------------------
+\titleformat{\section}{\hssubheadfont\fontsize{17pt}{21pt}\selectfont\color{ink}}{}{0pt}{}
+\titlespacing*{\section}{0pt}{32pt}{8pt}
+
+% ---- page breaks ------------------------------------------------------------
+% No paragraph leaves one line alone at the top or the bottom of a page, and no
+% display leaves one line alone after it. The page is ragged at the foot (the
+% article class's one-sided default, kept here on purpose): a short page ends
+% short rather than stretching its gaps, so these penalties never leave a page
+% with its paragraphs pulled apart.
+\widowpenalty=10000
+\clubpenalty=10000
+\@clubpenalty=10000
+\displaywidowpenalty=10000
+\raggedbottom
+% A heading keeps a few lines of what follows it on its own page: a section
+% needs room for its heading and three lines, a subsection for its heading and
+% two, or it starts the next page. Titlesec already glues a heading to the
+% first line after it; this stops it standing over one or two lines at a foot.
+% A heading set straight under another one skips the check: needspace leaves a
+% legal break behind it, which would strand the heading above at the foot.
+\RequirePackage{needspace}
+\RequirePackage{etoolbox}
+\newcommand{\hs@headroom}[1]{\if@nobreak\else\needspace{#1\baselineskip}\fi}
+\pretocmd{\section}{\hs@headroom{7}}{}%
+  {\PackageWarning{housestyle}{could not patch \string\section; its heading may sit at a page foot}}
+\pretocmd{\subsection}{\hs@headroom{5}}{}%
+  {\PackageWarning{housestyle}{could not patch \string\subsection; its heading may sit at a page foot}}
+\newcommand{\hslead}[1]{{\hsfull\fontsize{11.5pt}{17pt}\selectfont\color{inkseventy}#1\par}}
+
+% ---- contents ---------------------------------------------------------------
+% The table of contents is the kit's too: no bold, no dot leaders. A Part is a
+% small-caps number in a 64 pt column and its title; a section sits on the
+% title's line; a subsection is one step smaller and ink-70. Page numbers are
+% ink-55 at the right margin.
+\setcounter{tocdepth}{2}
+% No right margin reserved: the page numbers sit on the margin itself.
+\contentsmargin{0pt}
+\newcommand{\hs@tocpage}{\textcolor{inkfiftyfive}{{\hs@figfont\thecontentspage}}}
+% The whole line -- label, title and page number -- is one hidden link to the
+% section: \hs@toclinkstart opens it (hyperref already set \Hy@tocdestname to
+% the section's anchor before calling this entry's \l@<level>) at the start of
+% the label column, and \hs@toclinkend closes it after the page number, so the
+% title in between (placed by titletoc itself, outside our control) and the
+% \hfill gap both fall inside the same link. \Hy@toclinkstart/\Hy@toclinkend
+% themselves pair a \begingroup/\endgroup around the link colour
+% (\Hy@colorlink/\Hy@endcolorlink); that is fine wrapped around one argument
+% (hyperref's own linktoc=all), but split across two titlecontents arguments
+% the way it is here, the label format's own closing brace ends with that
+% group still open -- an unbalanced brace to TeX. hidelinks means there is no
+% link colour to set, so the two halves below gobble that step, each keeping
+% its own \begingroup/\endgroup self-contained; linktoc=none (set on hyperref
+% above) stops hyperref wrapping the title a second time on its own.
+\newcommand{\hs@toclinkstart}{\begingroup\let\Hy@colorlink\@gobble\Hy@toclinkstart\endgroup}
+\newcommand{\hs@toclinkend}{\begingroup\let\Hy@endcolorlink\relax\Hy@toclinkend\endgroup}
+\titlecontents{part}[0pt]{\addvspace{16pt}}%
+  {\hs@toclinkstart\makebox[64pt][l]{\hslabel{Part \thecontentslabel}}}%
+  {\hs@toclinkstart\makebox[64pt][l]{}}%
+  {\hfill\hs@tocpage\hs@toclinkend}[\addvspace{2pt}]
+\titlecontents{section}[64pt]{\addvspace{1pt}}{\hs@toclinkstart}{\hs@toclinkstart}{\hfill\hs@tocpage\hs@toclinkend}
+\titlecontents{subsection}[80pt]{\fontsize{9.5pt}{14pt}\selectfont\color{inkseventy}}%
+  {\hs@toclinkstart}{\hs@toclinkstart}{\hfill\hs@tocpage\hs@toclinkend}
+\let\hs@tableofcontents\tableofcontents
+\renewcommand{\tableofcontents}{\begingroup\hsfull\hs@tableofcontents\endgroup}
+
+% ---- section numbering (optional) -------------------------------------------
+% Headings are unnumbered by default. \hsnumbersections turns numbers on for
+% the rest of the document: "2  Measured results", "2.1  A subsection", the
+% number in the heading's own face in ink-55, 14 pt (10 pt) before the title.
+% \section* stays unnumbered, so the contents and sources pages do not change.
+% In the contents, the number hangs to the left of the title, so titles line
+% up the same with numbering on or off. Put it after \input{preamble-template}
+% (the preamble sets the subsection format, and this overrides it). New in v5.
+\newcommand{\hs@tocnum}[1]{\llap{\textcolor{inkfiftyfive}{\hs@figfont #1}\hspace{10pt}}}
+\newcommand{\hsnumbersections}{%
+  \titleformat{\section}{\hssubheadfont\fontsize{17pt}{21pt}\selectfont\color{ink}}%
+    {\textcolor{inkfiftyfive}{\thesection}}{12pt}{}%
+  \titleformat{\subsection}{\hssubheadfont\fontsize{13pt}{17pt}\selectfont\color{ink}}%
+    {\textcolor{inkfiftyfive}{\thesubsection}}{8pt}{}%
+  \titlecontents{section}[64pt]{\addvspace{1pt}}%
+    {\hs@toclinkstart\hs@tocnum{\thecontentslabel}}{\hs@toclinkstart}{\hfill\hs@tocpage\hs@toclinkend}%
+  \titlecontents{subsection}[80pt]{\fontsize{9.5pt}{14pt}\selectfont\color{inkseventy}}%
+    {\hs@toclinkstart\hs@tocnum{\thecontentslabel}}{\hs@toclinkstart}{\hfill\hs@tocpage\hs@toclinkend}}
+
+% ---- lists ------------------------------------------------------------------
+\setlist[itemize,1]{label=\textcolor{inkfiftyfive}{\textbullet}}
+
+% ---- 1. title block ---------------------------------------------------------
+% \hstitle[size]{title}: the document title alone. New in v5. 32 pt by
+% default (the short form's \hstitleblock); a dedicated title page sets it at
+% 40 pt, \hstitle[40pt]{...}. Leading is 1.1 times the size.
+\newcommand{\hstitle}[2][32pt]{%
+  {\hsdisplayfont\fontsize{#1}{\dimexpr #1*11/10\relax}\selectfont
+   \hsfull\hyphenpenalty=10000 #2\par}}
+% \hstitleblock{eyebrow}{title}{lead}
+\newcommand{\hstitleblock}[3]{%
+  \hsaccentlabel{#1}\par\vspace{10pt}
+  \hstitle{#2}\vspace{12pt}
+  \hslead{#3}\vspace{18pt}}
+
+% ---- 2. figures: the frame, and the socket a picture goes in ---------------
+% A figure is two modules. The frame is here: \begin{hsfigure}{label}{legend}
+% draws the label, the grey rules, the legend and (with \hsfailnote) the fail
+% caption. The picture inside it comes from one of two places, and never
+% changes the frame:
+%   \hsdiagram{figures/name}   a PDF from diagram-maker (DIAGRAMS.md)
+%   \begin{tikzpicture}...     the TikZ kit in hsdiagrams.sty
+% Nothing in a picture may redefine a frame command, and nothing in the frame
+% reaches into a picture.
+%
+% \hsdiagram[includegraphics keys]{file}: the picture at its own size, or
+% scaled down to the measure if it is wider. Never scaled up, so a figure
+% rendered at the measure (DIAGRAMS.md, "Size") lands at 1:1 and its type
+% matches the page's. Ranged left like every other block.
+\newsavebox{\hs@diagbox}
+\newcommand{\hsdiagram}[2][]{%
+  \sbox{\hs@diagbox}{\includegraphics[#1]{#2}}%
+  {\hsfull\noindent\ifdim\wd\hs@diagbox>\linewidth
+    \includegraphics[width=\linewidth,#1]{#2}%
+  \else\usebox{\hs@diagbox}\fi\par}}
+% The fail path is one accent line and one accent caption, and the caption sits
+% under the picture rather than inside the arrows. Text italic, as written.
+\newcommand{\hsfailnote}[1]{%
+  \par\vspace{7pt}{\hsfull\rmfamily\itshape\fontsize{8.5pt}{11.5pt}\selectfont\color{accent}%
+  #1\par}}
+
+% \begin{hsfigure}{Figure 1 / caption label}{the legend sentence} ... \end{hsfigure}
+% \parskip is 0 inside, as in the claim and the callout: pitch (4) had 11 pt
+% more at every \par, about 70 pt of air in every figure.
+\newenvironment{hsfigure}[2]{%
+  \par\vspace{24pt}\setlength{\parskip}{0pt}{\hsfull\hslabel{#1}\par}\nopagebreak\vspace{8pt}\hsthinrule\nopagebreak\vspace{14pt}
+  \def\hs@legend{#2}\hsfull\noindent\ignorespaces}{%
+  \par\vspace{10pt}\hsthinrule\vspace{7pt}
+  \raggedright{\hsfull\fontsize{9pt}{13pt}\selectfont\color{inkseventy}%
+    \hs@legend\par}\vspace{24pt}}
+
+% The TikZ kit: its own file, so a change to it (or to diagram-maker) cannot
+% touch the page.
+\ifhs@diagramkit\RequirePackage{hsdiagrams}\fi
+
+% ---- 3. stat row ------------------------------------------------------------
+% \begin{hsstatrow}[n] \hsstat{741}{caption} ... \end{hsstatrow}, n = 2, 3 or 4.
+% Four is the maximum. A fifth \hsstat raises an error rather than wrapping.
+% The figure is Source Serif 4 Display at 24 pt with lining tabular figures.
+\newcounter{hs@stats}\newcounter{hs@statmax}
+\newlength{\hs@statwidth}
+\newcommand{\hsstat}[2]{%
+  \stepcounter{hs@stats}%
+  \ifnum\value{hs@stats}>\value{hs@statmax}
+    \PackageError{housestyle}{More than \thehs@statmax\space figures in one
+      hsstatrow}{Four abreast is the maximum. Split into two rows, or use a data
+      table.}%
+  \fi
+  \begin{minipage}[t]{\hs@statwidth}\hsfull
+    {\statfont\fontsize{24pt}{24pt}\selectfont #1}\par\vspace{6pt}
+    {\fontsize{8.5pt}{12pt}\selectfont\color{inkseventy}#2\par}
+  \end{minipage}\hfill}
+\newenvironment{hsstatrow}[1][4]{%
+  \setcounter{hs@stats}{0}\setcounter{hs@statmax}{#1}\setlength{\parskip}{0pt}%
+  \setlength{\hs@statwidth}{\dimexpr(\linewidth-#1\dimexpr 16pt\relax)/#1\relax}%
+  \par\vspace{20pt}\hsrule\par\nopagebreak\vspace{14pt}\hsfull\noindent}%
+  {\par\nopagebreak\vspace{14pt}\hsthinrule\par\vspace{20pt}}
+
+% ---- 4-5. tables ------------------------------------------------------------
+% A table is a block, not prose, so it sits on the whole measure:
+%   \begin{hsblock}\hslabel{Table 1 / ...}\par\vspace{8pt}\begin{tabular}...
+\newenvironment{hsblock}{\par\begingroup\hsfull\noindent\ignorespaces}%
+  {\par\endgroup}
+\newcolumntype{L}[1]{>{\raggedright\arraybackslash}p{#1}}
+\newcolumntype{R}[1]{>{\raggedleft\arraybackslash}p{#1}}
+\newcommand{\hshead}[1]{\hslabel{#1}}
+\newcommand{\hsaccenthead}[1]{\hsaccentlabel{#1}}
+\setlength{\arrayrulewidth}{0.75pt}
+\arrayrulecolor{rulegrey}
+\newcommand{\hstoprule}{\arrayrulecolor{ink}\hline\arrayrulecolor{rulegrey}}
+\renewcommand{\arraystretch}{1.45}
+
+% ---- 6. figure plate --------------------------------------------------------
+% \hsplate{file}{name}{grey facts}{status}{caption}
+\newcommand{\hsplate}[5]{%
+  \par\vspace{14pt}{\hsfull\noindent\includegraphics[width=\linewidth]{#1}\par}%
+  \vspace{7pt}
+  {\labelfont\fontsize{8.5pt}{12pt}\selectfont #2\quad
+    \textcolor{inkfiftyfive}{#3}\quad\textcolor{accent}{#4}\par}
+  \vspace{8pt}{\hsfull\fontsize{9.5pt}{14pt}\selectfont #5\par}\vspace{24pt}}
+
+% ---- 7. provenance footline -------------------------------------------------
+% Serif at 7.5 pt in ink-55, as written: no case change, and TeX ligatures off
+% so a command's "--flag" survives. The font feature alone is not relied on:
+% every "--" at the argument's top level also gets a zero kern between its two
+% hyphens, which no font can join into a dash. A braced group, such as an
+% \hsurl, is left as typed.
+\ExplSyntaxOn
+\tl_new:N \l__hs_note_tl
+\cs_new_protected:Npn \__hs_keep_hyphens:n #1
+  {
+    \tl_set:Nn \l__hs_note_tl {#1}
+    % Twice: one pass leaves the last two of "---" together.
+    \tl_replace_all:Nnn \l__hs_note_tl { -- } { - \kern 0pt - }
+    \tl_replace_all:Nnn \l__hs_note_tl { -- } { - \kern 0pt - }
+    \tl_use:N \l__hs_note_tl
+  }
+\cs_new_eq:NN \hs@keephyphens \__hs_keep_hyphens:n
+\ExplSyntaxOff
+\newcommand{\hsprovenance}[1]{%
+  \par\vfill\hsthinrule\par\vspace{6pt}
+  {\setlength{\parskip}{0pt}\hsfull\hs@notefont\fontsize{7.5pt}{11pt}\selectfont\color{inkfiftyfive}%
+  \hs@keephyphens{#1}\par}}
+
+% ---- 8. sources -------------------------------------------------------------
+\newlist{hssources}{enumerate}{1}
+\setlist[hssources]{label=\textcolor{accent}{\hs@figfont\arabic*},
+  align=left,leftmargin=26pt,labelsep=0pt,labelwidth=26pt,
+  itemsep=9pt,topsep=12pt,parsep=0pt,
+  before=\hsgsection{Sources}\fontsize{9.5pt}{14pt}\selectfont\raggedright}
+% \hssourcespage: the last page opens with this. It starts a new page and heads
+% it "Sources", which is what the running head also says. New in v5; the
+% pitch build skipped the heading and the page opened on a bare sentence.
+\newcommand{\hssourcespage}{\clearpage\section*{Sources}\hsgsection{Sources}}
+% A URL inside a source entry: mono, ink-70, breaks anywhere, never hyphenated.
+% xurl lets a URL break anywhere; these penalties make it prefer a break after
+% / . - and break inside a word only when nothing else fits (pitch (4) split
+% "git/hub"). A little stretch between characters absorbs the rest.
+\mathchardef\UrlBreakPenalty=6000
+\mathchardef\UrlBigBreakPenalty=0
+\def\UrlBigBreaks{\do\/\do\.\do\-\do\_}
+\Urlmuskip=0mu plus 1.5mu
+\newcommand{\hsurl}[1]{{\ttfamily\color{inkseventy}\url{#1}}}
+
+% ---- 9. claim ---------------------------------------------------------------
+% \nopagebreak between its parts, here and in hsstatrow and hsfigure: a v5.1
+% build left a block's opening rule alone at the foot of one page and the rest
+% of the block on the next.
+% \parskip is 0 inside, so the gaps are the ones written here and not 11 pt
+% more at every \par (the pitch build had 44 pt between the label and the
+% closing rule).
+\newcommand{\hsclaim}[2]{%
+  \par\vspace{16pt}\begingroup\setlength{\parskip}{0pt}\hsrule\nopagebreak\vspace{14pt}
+  {\hsfull\hssubheadfont\fontsize{17pt}{23pt}\selectfont #1\par}\nopagebreak\vspace{10pt}
+  {\hslabel{#2}\par}\nopagebreak\vspace{4pt}\hsrule
+  \endgroup\vspace{16pt}}
+
+% ---- 10. callout ------------------------------------------------------------
+% v5: no filled box. A callout is ruled like every other block -- a grey rule
+% above and below -- with its accent small-caps label hanging in a 96 pt
+% column to the left of the body, first baselines aligned. It stays on the
+% page's paper, so it reads as part of the page rather than something pasted
+% onto it. The two minipages do not break across a page; keep a callout to a
+% few lines, which it should be anyway.
+\newenvironment{hscallout}[1]{%
+  \par\vspace{8pt}\begingroup\setlength{\parskip}{0pt}\hsthinrule\vspace{9pt}%
+  \hsfull\noindent
+  \begin{minipage}[t]{96pt}\hsfull\hyphenpenalty=10000
+    \fontsize{8.5pt}{15pt}\selectfont\hsaccentlabel{#1}\par\end{minipage}%
+  \hspace{16pt}%
+  \begin{minipage}[t]{\dimexpr\linewidth-112pt\relax}\hsfull
+  \fontsize{10pt}{15pt}\selectfont\ignorespaces}%
+  {\par\end{minipage}\par\vspace{10pt}\hsthinrule\endgroup\vspace{8pt}}
+
+% ---- 11. code ---------------------------------------------------------------
+\RequirePackage{fvextra}
+\fvset{fontsize=\small,breaklines=true,breakanywhere=true,numbers=none,
+  frame=topline,framerule=0.75pt,rulecolor=\color{ink},
+  framesep=10pt,baselinestretch=1.25}
+% A listing's caption stays on the page with its code: \hslisting ends with
+% \@nobreaktrue, so the Verbatim after it adds no break of its own before its
+% first line. A listing of up to \hs@lstshort lines never breaks. A longer one
+% may break, but the club and widow penalties above keep at least two lines on
+% each side. The length is known from the last pass: each Verbatim after an
+% \hslisting writes its line count to the .aux, and build.sh runs three passes.
+\newcommand{\hslisting}[1]{\par\vspace{24pt}{\hsfull\hslabel{#1}\par}%
+  \nobreak\vspace{8pt}\nobreak\@nobreaktrue
+  \global\advance\hs@lstno\@ne\global\hs@lstnexttrue}
+% Use: \hslisting{Listing 1 / the gate} \begin{Verbatim}[bgcolor=codefill] ... \end{Verbatim}
+\newcount\hs@lstno
+\newif\ifhs@lstnext
+\def\hs@lstshort{15}
+\let\hs@lstcur\relax
+\newcommand{\hs@lstlen}[2]{\expandafter\gdef\csname hs@lstlen@#1\endcsname{#2}}
+\def\hs@lsthook{\ifhs@lstnext
+  \global\hs@lstnextfalse
+  \edef\hs@lstcur{\the\hs@lstno}%
+  \@ifundefined{hs@lstlen@\hs@lstcur}{}{%
+    % "make short listings (say under ~15 lines) unbreakable": no break
+    % anywhere unless the listing is longer than \hs@lstshort lines.
+    \ifnum\csname hs@lstlen@\hs@lstcur\endcsname>\hs@lstshort\relax\else
+      \interlinepenalty\@M\fi}%
+  \fi}
+\def\hs@lstwrite{\ifx\hs@lstcur\relax\else
+  \immediate\write\@auxout{\string\hs@lstlen{\hs@lstcur}{\the\c@FancyVerbLine}}\fi}
+\patchcmd{\FV@List}{\FV@InterLinePenalty}{\FV@InterLinePenalty\hs@lsthook}{}%
+  {\PackageWarning{housestyle}{could not patch \string\FV@List; short listings may break}}
+\pretocmd{\FV@EndList}{\hs@lstwrite}{}%
+  {\PackageWarning{housestyle}{could not patch \string\FV@EndList; short listings may break}}
+% fvextra follows each line of a bgcolor listing with a negative \vspace for
+% the colour overlap. Glue after a box is a legal break with no penalty, so a
+% listing could break after any line, the first included, whatever the
+% penalties above say. A \nobreak ahead of that glue leaves the line penalties
+% as the only breaks. The first line sets it from inside an \hbox, where it
+% moves out as a \vadjust, so the \nobreak goes in there too.
+\def\FV@bgcoloroverlap{\ifx\FV@backgroundcolorboxoverlap\relax\else
+  \ifvmode\nobreak\vspace{-\FV@backgroundcolorboxoverlap}%
+  \else\vadjust{\nobreak\vskip-\FV@backgroundcolorboxoverlap\relax}\fi\fi}
+
+% ---- 12. display equation ---------------------------------------------------
+\allowdisplaybreaks
+\renewcommand{\theequation}{\arabic{equation}}
+% Use plain \begin{equation} ... \end{equation}; numbers sit at the right margin.
+
+\endinput

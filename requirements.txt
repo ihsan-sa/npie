@@ -1,0 +1,11 @@
+# Core: procedure generation, the simulated bench, reports.
+pyyaml
+sexpdata
+matplotlib
+numpy
+# Real instruments (bench host only).
+pyvisa
+pyvisa-py
+pyserial
+# Tests.
+pytest

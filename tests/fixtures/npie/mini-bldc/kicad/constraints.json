@@ -1,0 +1,53 @@
+{
+ "voltages": [
+  {
+   "net": "/VM_IN",
+   "voltage": 30
+  },
+  {
+   "net": "GND",
+   "voltage": 0
+  },
+  {
+   "net": "/PHASE_A",
+   "voltage": 30
+  },
+  {
+   "net": "+5V",
+   "voltage": 5
+  },
+  {
+   "net": "+3V3",
+   "voltage": 3.3
+  },
+  {
+   "net": "/regulators/BUCK_SW",
+   "voltage": 30
+  }
+ ],
+ "power": [
+  {
+   "net": "/VM_IN",
+   "current_a": 5,
+   "pdn": false
+  },
+  {
+   "net": "+5V",
+   "current_a": 0.3
+  },
+  {
+   "net": "+3V3",
+   "current_a": 0.1
+  },
+  {
+   "net": "/PHASE_A",
+   "current_a": 5,
+   "pdn": false
+  },
+  {
+   "net": "/regulators/BUCK_SW",
+   "current_a": 0.4,
+   "pdn": false
+  }
+ ]
+}
