@@ -52,6 +52,9 @@ under the board's `bringup/`.
 .venv/bin/python -m pytest tests
 ```
 
+`make check` does the same with `NPIE_BENCH_HOST` cleared, so it only ever
+uses the simulated bench; it builds `.venv` from `requirements.txt` first if needed.
+
 They run against a small synthetic board in `tests/fixtures` and a simulated
 bench. The one test that needs a real board from the boards repo is skipped,
 with the reason, when that board is not under `HWDE_BOARDS_ROOT`.
