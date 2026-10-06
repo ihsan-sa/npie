@@ -18,7 +18,7 @@ editing any of it:
 | Input | Used for |
 |---|---|
 | `kicad/<board>.net` | nets, parts on each net, test points, connectors, the SWD/UART pinouts |
-| `kicad/constraints.json` | `voltages[]` (rail nominals), `power[]` (design currents per rail) |
+| `kicad/constraints.json` | `voltages[]` (rail nominals), `power[]` (design currents per rail), `blocks[]` (the EVN header, section 2) |
 | `fab/BOM.csv` | values of the parts a step names (fuse ratings, LED colours) |
 | `requirements.md` | the operating range (VM min/max) when constraints does not carry it |
 | `firmware/fwe-manifest.json` | flash command, UART protocol, test hooks, safety limits (/fwe's contract, schema `fwe-manifest/1`) |
@@ -57,29 +57,38 @@ each limit comes from:
    stage nets, whose bulk capacitors make the reading climb). Diode-mode
    checks where the netlist shows a body diode across two probe points
    (phase -> VM, GND -> phase on a half-bridge): 0.3-0.8 V.
-3. **power-up** - current-limited. Supply at the lowest in-range input
+3. **host-link** - only for a board whose `blocks[]` has a
+   board-to-board header naming "EVN JP8" (it sits under Lattice's
+   LFE5UM5G-85F-EVN). Human steps: the EVN rework (R34/R35 fitted as 0R;
+   R22/R23 stay fitted, they carry I2C), FT2232H port B's EEPROM backed up
+   and switched to UART with `fixFT2232_ecp5evn` (P2 the FPGA's rx, P3 its
+   tx), the bitstream loaded; then a `pwm` step whose id read must return
+   0xF8. Mated, with this board unpowered, a person types the DMM reading
+   on the header's pins 1 and 17 (the block's `vio_v` +/-5 %) and 6 and 9
+   (GND, within 5 % of `vio_v`).
+4. **power-up** - current-limited. Supply at the lowest in-range input
    (VM min + 2 V, never below the regulator's VIN min), current limit =
    idle-budget x 2, capped at 0.2 A for a first power-up. Expected idle
    current: the sum of the low-voltage rails' idle draw referred to the
    input through an assumed 80 % efficiency; the upper limit is the limit
    the supply is set to, the lower limit a floor that says something is
    alive (2 mA).
-4. **rails** - DC voltage of every regulated rail at its test point or the
+5. **rails** - DC voltage of every regulated rail at its test point or the
    nearest pad the netlist names. Limit: nominal from `voltages[]`, +/-5 %
    for LDO and buck rails, +/-8 % for boost rails and anything without a
    known regulator. Ripple on switching rails by scope when a scope is on
    the bench (limit: 2 % of nominal pk-pk).
-5. **programming** - flash with the manifest's command for the probe the
+6. **programming** - flash with the manifest's command for the probe the
    bench names, then read the boot banner on the console
    (`banner_regex`) and the boot event.
-6. **blocks** - the manifest's `test_hooks` (unattended), then per-block
+7. **blocks** - the manifest's `test_hooks` (unattended), then per-block
    checks the netlist implies: sense offsets (CSA outputs at mid-supply),
    bus-voltage reading vs the supply setpoint, LEDs and buttons (human),
    Hall/encoder inputs (logic analyser or console), gate drive with no
    motor (a `safe: false` command, so it is preceded by a human step).
-7. **full-function** - motor connected, low duty, current limit held; a
+8. **full-function** - motor connected, low duty, current limit held; a
    person confirms rotation and the supply current stays under the limit.
-8. **limits** - operating range corners (VM min and max from the
+9. **limits** - operating range corners (VM min and max from the
    requirements), under-voltage trip from the manifest's `vbus_uv_v`
    (expect the fault event within +/-0.5 V). Nothing above the rated
    maximum input is applied; over-voltage tests beyond it are listed as

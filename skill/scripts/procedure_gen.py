@@ -35,6 +35,7 @@ BENCH_EXAMPLE = {
     "logic": '{driver: sigrok, device: fx2lafw}',
     "console": '{driver: serial, port: /dev/ttyUSB0, baud: 115200}',
     "probe": '{driver: swd, tool: probe-rs}',
+    "pwm": '{driver: fwe-pwm8, port: /dev/ttyUSB1, baud: 115200, f_rf_hz: 13560267.8}',
 }
 
 

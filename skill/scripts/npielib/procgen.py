@@ -11,6 +11,14 @@ Every limit is derived from a design fact and says which one in the step's
 - rails: nominal from constraints voltages[], +/-5 %, +/-8 % for a rail made
   through a catch diode (asynchronous converter); a rail rated like the input
   follows the supply setpoint (-5 %/+1 %). Ripple 2 % pk-pk on switched rails.
+- host link: a board whose constraints blocks[] has a board-to-board header
+  naming "EVN JP8" sits under Lattice's LFE5UM5G-85F-EVN and talks to the
+  FPGA through FT2232H port B. Before its own first power: the EVN rework
+  (R34/R35 fitted as 0R, R22/R23 left fitted because they carry I2C), the
+  EEPROM backup and fixFT2232_ecp5evn, and the fwe-pwm8 id read (0xF8), all
+  confirmed by a person; then, mated, a meter reads the block's vio_v on the
+  header's pins 1 and 17 and GND on pins 6 and 9 (Raspberry Pi numbering),
+  +/-5 % of vio_v.
 - blocks: a current-sense amp's output at zero current sits at the mean of its
   REF pins' nets; everything firmware-driven comes from the fwe manifest.
 """
@@ -20,6 +28,7 @@ import re
 from datetime import datetime, timezone
 
 from .design import Design, DesignError
+from .instruments import PWM8_ID
 
 SCHEMA = "npie-procedure/1"
 
@@ -33,6 +42,9 @@ DIODE_V = (0.3, 0.8)
 TOL_REG = 0.05
 TOL_ASYNC = 0.08
 RIPPLE_FRAC = 0.02
+
+EVN_HEADER_RE = re.compile(r"\bEVN JP8\b")
+EVN_V_PINS, EVN_GND_PINS = ("1", "17"), ("6", "9")   # JP8, Raspberry Pi numbering
 
 _INPUT_RE = re.compile(r"(^|/)(VIN|VM|VBAT|VBUS|VSUP|VCC_IN|VIN_RAW)(_IN)?$|_IN$", re.I)
 _NOT_RAIL_RE = re.compile(r"BST|/G[HL][A-Z]?$|GATE|_SW$|(^|/)SW|PHASE|SNB", re.I)
@@ -194,6 +206,49 @@ class _Builder:
                           derived_from=f"{fet} body diode (netlist S={_short(plus['net'])}, "
                                        f"D={_short(minus['net'])})",
                           text=f"{fet} body diode conducts one way")
+
+    def host_link(self):
+        hdr = next((b for b in self.d.blocks
+                    if b.get("topology") == "board-to-board-header"
+                    and EVN_HEADER_RE.search(b.get("name", ""))), None)
+        if hdr is None:
+            return
+        self.stage("host-link", "EVN host link (before this board's first power)")
+        j = hdr["name"].split()[0]
+        vio = float((hdr.get("operating_point") or {}).get("vio_v", 3.3))
+        src = f"constraints blocks[{hdr.get('block', '?')}] {hdr['name']}"
+        self.human("EVN unplugged from USB and from this board. Check the host-link "
+                   "rework on the LFE5UM5G-85F-EVN: R34 and R35 fitted as 0R, and R22 "
+                   "and R23 still fitted (they carry I2C; do not remove them).",
+                   derived_from="Lattice EVN user guide: R34/R35 connect FT2232H port B "
+                                "to the FPGA UART")
+        self.human("Plug the EVN into USB. Read FT2232H port B's EEPROM to a file and "
+                   "keep it, before anything writes to it.",
+                   derived_from="the EEPROM write below is the only way back")
+        self.human("Switch port B from FIFO to UART: fixFT2232_ecp5evn -v 0x403 "
+                   "-p 0x6010, then unplug and replug the EVN. Port B now enumerates "
+                   "as the second serial port (P2 is the FPGA's rx, P3 its tx).",
+                   derived_from="fwe fpga-boards lfe5um5g-85f-evn uart_note")
+        self.human("Load the PWM bitstream onto the EVN, then confirm the next step "
+                   "reads the generator's id over port B.")
+        self.step("pwm", role="pwm", set={"enable": False},
+                  derived_from=f"fwe-pwm8-reg/1 id register 0x00 reads 0x{PWM8_ID:02X}; "
+                               "any other byte aborts the run",
+                  text=f"the PWM UART answers 0x{PWM8_ID:02X}")
+        self.human(f"EVN off USB. Mate this board's {j} with the EVN's JP8, then plug "
+                   "the EVN back into USB. This board's own supply stays off.")
+        tol = TOL_REG
+        for pins, nom in ((EVN_V_PINS, vio), (EVN_GND_PINS, 0.0)):
+            for pin in pins:
+                lo, hi = (round(nom * (1 - tol), 3), round(nom * (1 + tol), 3)) if nom \
+                    else (round(-vio * tol, 3), round(vio * tol, 3))
+                what = f"{vio:g} V" if nom else "GND"
+                self.human(f"DMM on DC volts: red (+) on {j} pin {pin}, black (-) on "
+                           f"the EVN's GND (its USB shell). Type the reading ({what}).",
+                           value={"unit": "V"},
+                           expect={"nominal": nom, "min": lo, "max": hi, "unit": "V"},
+                           derived_from=f"{src}: JP8 pin {pin} is {what}, vio_v "
+                                        f"{vio:g} V +/-{tol * 100:g} %")
 
     def power_up(self):
         self.stage("power-up", "Current-limited power-up")
@@ -473,6 +528,7 @@ def generate(d: Design, now: datetime | None = None) -> dict:
     b.analyse()
     b.visual()
     b.unpowered()
+    b.host_link()
     b.power_up()
     b.rails_stage()
     b.programming()

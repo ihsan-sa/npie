@@ -6,7 +6,7 @@ design file. The loaded Design carries the sha256 of every input, so a
 procedure records which design it was generated from.
 
 Inputs (reference/design.md section 1): kicad/<board>.net (kicadsexpr netlist),
-kicad/constraints.json (voltages[], power[]), fab/BOM.csv, requirements.md
+kicad/constraints.json (voltages[], power[], blocks[]), fab/BOM.csv, requirements.md
 (operating range), firmware/fwe-manifest.json (optional) and
 bringup/overrides.yaml (optional: step id -> expect fields a person set).
 """
@@ -120,6 +120,7 @@ class Design:
     vin_range: tuple | None           # (min, max) operating input, from requirements
     manifest: dict | None
     overrides: dict = field(default_factory=dict)  # step id -> expect fields
+    blocks: list = field(default_factory=list)   # constraints blocks[] entries
     inputs: dict = field(default_factory=dict)   # name -> {path, sha256}
 
     # ---- netlist queries
@@ -167,7 +168,7 @@ def load(ws: str | Path) -> Design:
     parsed = parse_netlist(netfile)
 
     cons_path = kdir / "constraints.json"
-    voltages, power = {}, []
+    voltages, power, blocks = {}, [], []
     if cons_path.is_file():
         inputs["constraints"] = cons_path
         try:
@@ -177,6 +178,7 @@ def load(ws: str | Path) -> Design:
         voltages = {v["net"]: float(v["voltage"]) for v in cons.get("voltages", [])
                     if "net" in v and "voltage" in v}
         power = [p for p in cons.get("power", []) if "net" in p]
+        blocks = [b for b in cons.get("blocks", []) if isinstance(b, dict)]
 
     bom = root / "fab" / "BOM.csv"
     if bom.is_file():
@@ -220,7 +222,7 @@ def load(ws: str | Path) -> Design:
         workspace=root, board=board,
         components=parsed["components"], nets=parsed["nets"],
         voltages=voltages, power=power, vin_range=_vin_range(req),
-        manifest=manifest, overrides=overrides,
+        manifest=manifest, overrides=overrides, blocks=blocks,
         inputs={k: {"path": str(p.relative_to(root)), "sha256": sha256(p)}
                 for k, p in inputs.items()},
     )
