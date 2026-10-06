@@ -581,7 +581,8 @@ class Pwm8:
         ident = self.read(0x00)
         if ident != PWM8_ID:
             raise BenchError(f"pwm: id register reads 0x{ident:02X}, not 0x{PWM8_ID:02X}; "
-                             "is the PWM bitstream loaded and the UART rework done?")
+                             "is the PWM bitstream loaded, R34/R35 fitted as 0R and FT2232H "
+                             "port B switched to UART with fixFT2232_ecp5evn?")
         self.n, self.ch = self.read(PWM8_N), self.read(0x04)
 
     def _reply(self, sent: bytes) -> int:

@@ -45,6 +45,11 @@ def step_text(s: dict) -> str:
         return f"Console {send}, expect `{s['expect_re']}` within {s['timeout_s']:g} s"
     if t == "wait":
         return f"Wait {s['seconds']:g} s"
+    if t in ("pwm", "awg"):
+        what = "PWM generator" if t == "pwm" else f"Generator ch{s.get('channel', 1)}"
+        sets = ", ".join(f"{k} {({True: 'on', False: 'off'}.get(v, v))}"
+                         for k, v in s["set"].items())
+        return f"{what}: {sets}" + (f" ({s['text']})" if s.get("text") else "")
     return t
 
 

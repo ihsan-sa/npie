@@ -43,4 +43,11 @@ mismatch; a different frequency is a rebuild or the SDG6032X. A read reply of
 Both are written from their sources (the fwe gateware's pwm8_ctrl.v; Siglent's
 SDG programming guide: Cn:BSWV, Cn:OUTP, MODE PHASE-LOCKED) and tested against
 protocol models only. First bench run: check the SDG's BSWV? reply format and
-units, and that the PWM UART answers 0xF8 after the R22/R23/R34/R35 rework.
+units, and that the PWM UART answers 0xF8 after the EVN host-link rework
+(R34/R35 fitted as 0R; see the next entry).
+
+## 2026-10-06 [serial] the EVN host-link rework keeps R22/R23
+PR #3 said R22/R23 come off; wrong. They stay fitted because they carry I2C.
+Per the Lattice user guide only R34/R35 get fitted as 0R. Then FT2232H port
+B's EEPROM is backed up and switched to UART with fixFT2232_ecp5evn; the
+FPGA's rx is P2 and its tx P3. The procedure's EVN steps are human-confirmed.
