@@ -40,6 +40,17 @@ step with `expect`). Type-specific keys:
 | `flash` | `role` (`probe`), `artifact` (`elf`/`hex`/`bin`) |
 | `console` | `role`, `send` (or null to only read), `expect_re`, `timeout_s`, `fields` (JSON path -> expect) |
 | `wait` | `seconds` |
+| `pwm` | `role` (`pwm`), `set: {f_hz, duty, phase_deg, enable}`, each optional; `duty` (0..1) and `phase_deg` are one number for every channel or `{"<ch>": value}` for channels 0..7 |
+| `awg` | `role` (`awg`), `channel` (1 or 2), `set: {wave, f_hz, vpp, offset, duty, phase_deg, load, output}`, all optional (`wave` defaults to `SQUARE`); `load` is `50` or `"hiz"` |
+
+A `pwm` step drives /fwe's FPGA PWM generator (protocol `fwe-pwm8-reg/1`). Its
+frequency is fixed by the bitstream, so `f_hz` is a check, not a setting: a
+value more than 100 ppm off the generator's f_rf aborts the run. Duty and
+phase land on the nearest of the N steps in a period (N = 56 on the ECP5
+board), all channels at the same period start, and the record's `applied`
+says what landed. An `awg` step reads every value back and aborts on a
+mismatch. A run that stops for any reason turns off the supply, then the
+outputs of any pwm or awg it opened.
 
 `points` are `{"ref": "TP101", "pin": "1", "net": "/power_in/VM_IN", "label": "TP101 (VM_IN)"}`.
 

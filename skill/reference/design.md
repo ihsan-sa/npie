@@ -158,7 +158,7 @@ confirm path; the simulated board's state is kept in the run directory
 ## 4. Instruments: one driver layer
 
 Steps name a **role** (`psu`, `dmm`, `scope`, `awg`, `eload`, `logic`,
-`console`, `probe`), never an instrument. `bench.yaml` binds roles to
+`console`, `probe`, `pwm`), never an instrument. `bench.yaml` binds roles to
 drivers and addresses:
 
 ```yaml
@@ -170,6 +170,8 @@ roles:
   logic:   {driver: sigrok, device: "fx2lafw"}
   console: {driver: serial, port: /dev/ttyUSB0}
   probe:   {driver: swd, tool: probe-rs}
+  pwm:     {driver: fwe-pwm8, port: /dev/ttyUSB1, baud: 115200, f_rf_hz: 13560267.8}
+  awg:     {driver: scpi-sdg, resource: "TCPIP0::192.168.1.60::INSTR"}
 ```
 
 Drivers (`scripts/npielib/instruments.py`), each a small class per role:
@@ -182,6 +184,12 @@ Drivers (`scripts/npielib/instruments.py`), each a small class per role:
   protocol decoders), not the Python bindings, which are not packaged.
 - **serial** through pyserial, speaking the manifest's line protocol
   (`OK`/`ERR`/`EVT`, events accepted between a command and its reply).
+- **fwe-pwm8** through pyserial, speaking /fwe's FPGA PWM register
+  protocol (`fwe-pwm8-reg/1`, fwe `reference/fpga.md`): per-channel duty
+  and phase in steps of the period, enable and commit. `f_rf_hz` comes from
+  the fpga manifest's `clock.f_rf_actual_hz`; the bitstream fixes it.
+- **scpi-sdg** is the Siglent SDG6032X in Siglent's own SCPI (`Cn:BSWV`,
+  `Cn:OUTP`, `MODE PHASE-LOCKED`), every setting read back.
 - **swd** runs the manifest's `flash.commands[<tool>]` with `{elf}` filled
   in; the tool comes from bench.yaml.
 - **sim** - every role has a simulated driver backed by one `SimBoard`
@@ -190,6 +198,9 @@ Drivers (`scripts/npielib/instruments.py`), each a small class per role:
   noise so readings vary but pass. Fault injection (`--sim-fault
   rail:+3V3=0` / `short:+5V` / `no-banner`) makes a chosen step fail, so
   the tests cover the failure paths (supply off on fail, stop at stage).
+  The pwm and awg sims are protocol models (the gateware's register file
+  byte for byte, the SDG's SCPI) under the live driver classes, and the
+  simulated scope reads f_rf and duty off the PWM generator while it runs.
 
 The tests run only against `sim`. No driver is ever opened against real
 hardware from the box (section 5).

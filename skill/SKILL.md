@@ -1,6 +1,6 @@
 ---
 name: npie
-description: Bring-up and test engineer for boards hwde designed. From a board workspace (netlist, constraints, requirements, BOM, the /fwe firmware manifest) it writes a staged bring-up and qualification procedure with pass/fail limits derived from the design, runs it through one instrument driver layer (SCPI/pyvisa, sigrok, serial, SWD) with human-confirmed steps, and records every run with a report PDF in the board's bringup/. Runs against a simulated bench anywhere; real instruments only on the bench host (the owner's laptop by default). Invoke via /npie <task> [board].
+description: Bring-up and test engineer for boards hwde designed. From a board workspace (netlist, constraints, requirements, BOM, the /fwe firmware manifest) it writes a staged bring-up and qualification procedure with pass/fail limits derived from the design, runs it through one instrument driver layer (SCPI/pyvisa, sigrok, serial, SWD, the /fwe FPGA PWM generator) with human-confirmed steps, and records every run with a report PDF in the board's bringup/. Runs against a simulated bench anywhere; real instruments only on the bench host (the owner's laptop by default). Invoke via /npie <task> [board].
 ---
 
 # npie playbook
