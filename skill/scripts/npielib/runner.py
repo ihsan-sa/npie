@@ -10,8 +10,8 @@ board's does.
 
 The engine never waits on a person: a human step ends the invocation with
 status awaiting_human, `confirm` records the answer and `advance` carries on.
-Any failed step or instrument error turns the supply outputs off before the
-run stops (reference/design.md section 3).
+Any failed step or instrument error turns the supply outputs off, then any
+pwm or awg outputs the run drove, before the run stops (reference/design.md section 3).
 """
 from __future__ import annotations
 
@@ -253,6 +253,14 @@ def execute(run: Run, s: dict) -> dict:
         if got:
             r["fields"] = got
         return r
+    if t == "pwm":
+        # the driver writes, reads every register back and refuses an f the
+        # bitstream was not built for; the record keeps the quantised result
+        applied = b.role("pwm").set(**s["set"])
+        return run.record(s, verdict="pass", set=s["set"], applied=applied)
+    if t == "awg":
+        applied = b.role("awg").set(channel=s.get("channel", 1), **s["set"])
+        return run.record(s, verdict="pass", set=s["set"], applied=applied)
     raise RunError(f"step {s['id']}: unknown type {t!r}")
 
 

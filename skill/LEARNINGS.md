@@ -3,7 +3,7 @@
 Append-only, dated, tagged. Grep by tag before touching an area.
 
 ## Tags
-[netlist] [manifest] [limits] [sim] [scpi] [sigrok] [serial] [swd] [report]
+[netlist] [manifest] [limits] [sim] [scpi] [sigrok] [serial] [swd] [report] [fwe]
 
 ## 2026-09-29 [netlist] KiCad 10 pinfunction carries the pin number
 A kicadsexpr export writes `(pinfunction "S_1")`, `(pinfunction "REF1_7")`: the
@@ -31,3 +31,16 @@ board's real, built manifest.
 ## 2026-09-29 [fwe] the manifest's artifact.sha256 is a dict
 `artifact.sha256` is keyed by artifact kind (`{"elf": ...}`), not one hash;
 the flash step records `sha256[<step artifact>]`.
+
+## 2026-10-06 [fwe][serial] the FPGA PWM generator has no frequency register
+fwe-pwm8-reg/1 sets duty and phase in steps of a period and enables/commits;
+f_rf is whatever the bitstream's PLLs make (13.56 MHz +19.75 ppm on the ECP5
+board, N = 56). The pwm driver treats a step's f_hz as a check and aborts on a
+mismatch; a different frequency is a rebuild or the SDG6032X. A read reply of
+0x45 is a value, not 'E': the driver only reads known addresses.
+
+## 2026-10-06 [scpi] verify-later: fwe-pwm8 and scpi-sdg have not met hardware
+Both are written from their sources (the fwe gateware's pwm8_ctrl.v; Siglent's
+SDG programming guide: Cn:BSWV, Cn:OUTP, MODE PHASE-LOCKED) and tested against
+protocol models only. First bench run: check the SDG's BSWV? reply format and
+units, and that the PWM UART answers 0xF8 after the R22/R23/R34/R35 rework.
