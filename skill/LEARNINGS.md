@@ -51,3 +51,16 @@ PR #3 said R22/R23 come off; wrong. They stay fitted because they carry I2C.
 Per the Lattice user guide only R34/R35 get fitted as 0R. Then FT2232H port
 B's EEPROM is backed up and switched to UART with fixFT2232_ecp5evn; the
 FPGA's rx is P2 and its tx P3. The procedure's EVN steps are human-confirmed.
+
+## 2026-10-08 [limits][fwe] a boost's output and bootstrap nets are ratings too
+On PCB-0026-A the boost output (+48V) carries 60 V and the bootstrap nets
+(HB, BOOT) 65 V and 35 V in voltages[]. Idle, the output sits at the input
+less the high side's reverse conduction, so it follows the supply (-3 V/+1 %);
+bootstrap nets are not rails. The fwe boost firmware drives HI as LO's
+complement, so open loop Vout = Vin/(1-D) even unloaded, and `duty` is refused
+while `arm` regulates. Its input trips latch only while switching.
+
+## 2026-10-08 [scpi] verify-later: the scope's dead-time query
+ScpiScope reads `deadtime` as `MEAS:FRD? CHAN1,CHAN2` (falling-to-rising delay,
+seconds), written from the generic Rigol-style set and never sent to a scope.
+First bench run on PCB-0026-A: check the query and its sign on the real scope.

@@ -56,7 +56,10 @@ each limit comes from:
    out a short (default 100 ohm for logic rails, 1 kohm for the input and
    stage nets, whose bulk capacitors make the reading climb). Diode-mode
    checks where the netlist shows a body diode across two probe points
-   (phase -> VM, GND -> phase on a half-bridge): 0.3-0.8 V.
+   (phase -> VM, GND -> phase on a half-bridge): 0.3-0.8 V. An integrated
+   GaN half-bridge IC (a U with SW/HS, VIN and HI/LI pins, the LMG2100) has
+   no body diode: its switch node gets the short check only, and the
+   skipped list says why.
 3. **host-link** - only for a board whose `blocks[]` has a
    board-to-board header naming "EVN JP8" (it sits under Lattice's
    LFE5UM5G-85F-EVN). Human steps: the EVN rework (R34/R35 fitted as 0R;
@@ -86,11 +89,28 @@ each limit comes from:
    bus-voltage reading vs the supply setpoint, LEDs and buttons (human),
    Hall/encoder inputs (logic analyser or console), gate drive with no
    motor (a `safe: false` command, so it is preceded by a human step).
-8. **full-function** - motor connected, low duty, current limit held; a
+8. **power-stage** - a boost (a `boost` block in `blocks[]`, a half-bridge
+   and a manifest `pwm`), output unloaded. Closed loop: `arm`, then
+   `status` vout_v at `safety.vout_target_v` +/-5 %. Open loop: `duty D0`,
+   D0 aimed at half `safety.vout_ov_v` (the HRTIM bridge is synchronous, so
+   Vout = Vin/(1-D) with no load and the step cannot run away); a meter
+   reads Vout +/-10 %, the scope reads `pwm.freq_hz` +/-2 %, D0 +/-0.03 on
+   the low-side gate and the dead time (`dead_time_ns` -2/+3 ns) from the
+   low side's falling edge to the high side's rising edge. Then every
+   manifest `trips[]` entry, each while switching at D0: an output-voltage
+   trip by a duty aimed at 1.05x its threshold (under 97 % of the output
+   net's rating), any other by a person injecting on its sense net through
+   100 ohm with a 20 mA limit (a step with `provoke`); each must bring its
+   `evt_regex` line, `status` outputs_on false, and `clear` after
+   `disarm`. Idle, the rails stage expects the boost output at the supply
+   setpoint less up to 3 V (the high side's reverse conduction).
+9. **full-function** - motor connected, low duty, current limit held; a
    person confirms rotation and the supply current stays under the limit.
-9. **limits** - operating range corners (VM min and max from the
+10. **limits** - operating range corners (VM min and max from the
    requirements), under-voltage trip from the manifest's `vbus_uv_v`
-   (expect the fault event within +/-0.5 V). Nothing above the rated
+   (expect the fault event within +/-0.5 V); on a firmware with a `pwm`
+   block the check runs while switching at D0, because it latches input
+   trips only then. Nothing above the rated
    maximum input is applied; over-voltage tests beyond it are listed as
    not run, with the reason.
 
@@ -253,6 +273,8 @@ npie reads only `firmware/fwe-manifest.json` (schema `fwe-manifest/1`,
 owned by /fwe; see its reference/manifest.md). It uses: `flash.commands`,
 `flash.connector`, `uart` (connector, pins, baud, banner_regex),
 `commands` (names, `safe`), `test_hooks` (send, expect, timeout_s, needs),
-`safety` (vbus_uv_v, vbus_ov_v, i_trip_a), `artifact.sha256[<kind>]` (recorded in
+`safety` (vbus_uv_v, vbus_ov_v, i_trip_a, vout_target_v, vout_ov_v, pwm_hz),
+`pwm` (outputs, freq_hz, dead_time_ns, max_duty), `trips` (name, sense_net,
+threshold, unit, evt_regex, clear), `artifact.sha256[<kind>]` (recorded in
 the run). A board with no manifest gets a procedure whose programming and
 firmware-driven block stages are listed as skipped with that reason.

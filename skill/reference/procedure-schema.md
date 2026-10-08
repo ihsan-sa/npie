@@ -32,10 +32,10 @@ step with `expect`). Type-specific keys:
 
 | type | keys |
 |---|---|
-| `human` | `text`, `value` (optional: `{"unit": "V"}` when the person types a reading), `expect` when `value` is set |
+| `human` | `text`, `value` (optional: `{"unit": "V"}` when the person types a reading), `expect` when `value` is set, `provoke` (optional: `{"trip": "<manifest trip name>", "on": true\|false}` when the person starts or stops injecting on that trip's sense net; the sim bench latches the trip from it) |
 | `supply` | `role`, `set: {v, i_limit, output}` |
 | `measure` | `role`, `quantity` (`voltage`, `current`, `resistance`, `diode`), `points: {"plus": ..., "minus": ...}`, `expect` |
-| `scope` | `role`, `channel`, `points`, `quantity` (`mean`, `vpp`, `freq`, `duty`), `expect`, `screenshot` |
+| `scope` | `role`, `channel`, `points`, `quantity` (`mean`, `vpp`, `freq`, `duty`, `deadtime`), `expect`, `screenshot`; `deadtime` (ns) is `channel`'s falling edge to `channel2`'s rising edge, and its `points` add `ch2` |
 | `logic` | `role`, `channels`, `samplerate`, `duration_s`, `expect: {"edges_min": n}` |
 | `flash` | `role` (`probe`), `artifact` (`elf`/`hex`/`bin`) |
 | `console` | `role`, `send` (or null to only read), `expect_re`, `timeout_s`, `fields` (JSON path -> expect) |

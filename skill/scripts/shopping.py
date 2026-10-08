@@ -71,7 +71,10 @@ def derive(proc: dict, manifest: dict | None) -> tuple[list, list]:
         sets = [st["set"] for _, st in by["psu"] if st["type"] == "supply"]
         v = max((s["v"] for s in sets), default=0)
         i = max((s["i_limit"] for s in sets), default=0)
-        eq.append({"role": "psu", "what": "programmable bench power supply, one channel",
+        inject = any((st.get("provoke") or {}).get("on") for _, st in _steps(proc))
+        eq.append({"role": "psu", "what": "programmable bench power supply, "
+                   + ("two channels (the second injects on a trip's sense net)"
+                      if inject else "one channel"),
                    "spec": f">= {_nice(v):g} V and >= {_nice(i * PSU_HEADROOM):g} A, "
                            "a settable current limit and output switch, SCPI over USB or LAN; "
                            f"highest setting {v:g} V / {i:g} A",
@@ -86,10 +89,14 @@ def derive(proc: dict, manifest: dict | None) -> tuple[list, list]:
                            + "; SCPI over USB or LAN",
                    "steps": [st["id"] for _, st in by["dmm"]]})
     if "scope" in by:
-        ch = max(st.get("channel", 1) for _, st in by["scope"])
+        ch = max(max(st.get("channel", 1), st.get("channel2", 1)) for _, st in by["scope"])
         hz = max((st["expect"].get("max") or 0 for _, st in by["scope"]
                   if st["quantity"] == "freq"), default=0)
-        bw = max(SCOPE_BW_FLOOR_HZ, _nice(hz * SCOPE_BW_PER_HZ))
+        # a dead time is read off edges a fifth of it long: bw = 0.35 / rise
+        dt = min((st["expect"]["nominal"] for _, st in by["scope"]
+                  if st["quantity"] == "deadtime"), default=None)
+        bw = max(SCOPE_BW_FLOOR_HZ, _nice(hz * SCOPE_BW_PER_HZ),
+                 _nice(0.35 / (dt * 1e-9 / 5)) if dt else 0)
         q = sorted({st["quantity"] for _, st in by["scope"]})
         eq.append({"role": "scope", "what": "digital oscilloscope with 10x probes",
                    "spec": f">= {bw / 1e6:g} MHz, >= {max(ch, 2)} channels, automatic "
