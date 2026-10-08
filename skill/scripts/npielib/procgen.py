@@ -21,6 +21,25 @@ Every limit is derived from a design fact and says which one in the step's
   +/-5 % of vio_v.
 - blocks: a current-sense amp's output at zero current sits at the mean of its
   REF pins' nets; everything firmware-driven comes from the fwe manifest.
+- half-bridges: a discrete pair (one FET's S is the other's D), or an
+  integrated half-bridge IC (a U with SW/HS, VIN and HI/LI pins, such as the
+  LMG2100). An integrated GaN stage gets no body-diode check (it has none).
+- boost power stage (a constraints block of topology boost, a half-bridge and
+  a manifest `pwm`): idle, the output follows the input through the high side
+  (at most BOOST_IDLE_DROP_V below it). Closed loop (`arm`), the firmware's
+  status vout_v sits at safety.vout_target_v +/-5 %. Open loop (`duty`, the
+  bridge synchronous, so Vout = Vin/(1-D) at no load), D0 aims at half the
+  output over-voltage level; a meter reads Vout within +/-10 % of
+  Vin/(1-D0), and the scope reads pwm.freq_hz +/-2 %, D0 +/-0.03 and the
+  dead time from dead_time_ns - DT_SKEW_NS to + DT_SKEW_NS + 1 ns (the
+  timer rounds it up). Each manifest trip is provoked while switching at D0
+  and must bring its evt_regex line and drop the outputs, then clear: an
+  output-voltage trip by an open-loop duty aimed at OVP_OVERSHOOT x its
+  threshold (below 97 % of the output net's rating), any other by a person
+  injecting on its sense net through INJECT_R_OHM with an INJECT_ILIM_A limit.
+- limits: the under-voltage trip is checked while switching at D0 when the
+  firmware has a `pwm` block (it latches input trips only while switching),
+  else with the bridge idle.
 """
 from __future__ import annotations
 
@@ -42,12 +61,22 @@ DIODE_V = (0.3, 0.8)
 TOL_REG = 0.05
 TOL_ASYNC = 0.08
 RIPPLE_FRAC = 0.02
+BOOST_IDLE_DROP_V = 3.0     # GaN reverse conduction, high side off
+VOUT_TOL_CLOSED = 0.05
+VOUT_TOL_OPEN = 0.10
+DUTY_TOL = 0.03
+DT_SKEW_NS = 2.0            # two probes' skew plus the scope's edge timing
+OVP_OVERSHOOT = 1.05
+INJECT_R_OHM = 100
+INJECT_ILIM_A = 0.02
+TRIP_SETTLE_S = 10.0        # a tripped, unloaded output bleeds down through its divider
 
 EVN_HEADER_RE = re.compile(r"\bEVN JP8\b")
 EVN_V_PINS, EVN_GND_PINS = ("1", "17"), ("6", "9")   # JP8, Raspberry Pi numbering
 
 _INPUT_RE = re.compile(r"(^|/)(VIN|VM|VBAT|VBUS|VSUP|VCC_IN|VIN_RAW)(_IN)?$|_IN$", re.I)
-_NOT_RAIL_RE = re.compile(r"BST|/G[HL][A-Z]?$|GATE|_SW$|(^|/)SW|PHASE|SNB", re.I)
+_NOT_RAIL_RE = re.compile(r"BST|/G[HL][A-Z]?$|GATE|_SW$|(^|/)SW|PHASE|SNB|(^|/)(HB|BOOT)$",
+                          re.I)
 
 
 def _short(net: str) -> str:
@@ -119,17 +148,20 @@ class _Builder:
         self.input = named_in[0] if named_in else (
             max(cands, key=lambda n: d.voltages[n]) if cands else None)
         vin_rating = d.voltages.get(self.input)
+        self.bridges = self._half_bridges()
+        self.boost = self._boost()
+        boost_out = self.boost["out"] if self.boost else None
         self.rails = []
         for n in cands:
             if n == self.input or n in pdn_false or _NOT_RAIL_RE.search(n):
                 continue
             v = d.voltages[n]
-            follows = vin_rating is not None and v == vin_rating
+            follows = (vin_rating is not None and v == vin_rating) or n == boost_out
             self.rails.append({"net": n, "v": v, "follows_input": follows,
+                               "boost_out": n == boost_out,
                                "async": self._via_catch_diode(n),
                                "switched": self._switched(n)})
         self.rails.sort(key=lambda r: (not r["follows_input"], -r["v"], r["net"]))
-        self.bridges = self._half_bridges()
 
     def _via_catch_diode(self, net: str) -> bool:
         for n in self.d.nets.get(net, []):
@@ -160,8 +192,26 @@ class _Builder:
                 if ls != hs and fl["D"] == phase:
                     out.append({"phase": phase, "hs": hs, "ls": ls,
                                 "bus": fh["D"], "ls_src": fl["S"]})
+        for u in self.d.refs("U"):
+            f = {}
+            for p in self.d.pins_of(u):
+                f.setdefault(p["func"], p["net"])
+            sw = f.get("SW") or f.get("HS")
+            gnd = f.get("PGND") or f.get("GND")
+            if sw and gnd and "VIN" in f and "HI" in f and ("LI" in f or "LO" in f):
+                out.append({"phase": sw, "hs": u, "ls": u, "bus": f["VIN"],
+                            "ls_src": gnd, "ic": u})
         out.sort(key=lambda b: b["phase"])
         return out
+
+    def _boost(self) -> dict | None:
+        """The boost stage: a boost block, a half-bridge, and firmware with a pwm block."""
+        m = self.d.manifest or {}
+        if not (m.get("pwm") and self.bridges
+                and any(b.get("topology") == "boost" for b in self.d.blocks)):
+            return None
+        b = self.bridges[0]
+        return {"out": b["bus"], "sw": b["phase"], "ic": b.get("ic") or b["hs"]}
 
     # ---- stages
 
@@ -195,6 +245,10 @@ class _Builder:
                                    f"{'power net' if power else 'logic rail'} {floor:g} ohm",
                       text=f"{_short(n)} to GND is not a short")
         for b in self.bridges:
+            if b.get("ic"):
+                self.skip(f"unpowered:{b['ic']}", f"{b['ic']} {self.d.value(b['ic'])} is an "
+                          "integrated half-bridge: no body diode to check")
+                continue
             ph, bus = self.point(b["phase"]), self.point(b["bus"])
             src = self.point(b["ls_src"])
             for plus, minus, fet in ((ph, bus, b["hs"]), (src, ph, b["ls"])):
@@ -298,7 +352,13 @@ class _Builder:
         g = self.point(self.gnd)
         for r in self.rails:
             p = self.point(r["net"])
-            if r["follows_input"]:
+            if r["boost_out"]:
+                nom = self.v_first
+                exp = {"nominal": nom, "min": round(nom - BOOST_IDLE_DROP_V, 3),
+                       "max": round(nom * 1.01, 3), "unit": "V"}
+                src = (f"idle boost output follows the input through {self.boost['ic']}'s "
+                       f"high side: setpoint -{BOOST_IDLE_DROP_V:g} V/+1 %")
+            elif r["follows_input"]:
                 nom = self.v_first
                 exp = {"nominal": nom, "min": round(nom * 0.95, 3),
                        "max": round(nom * 1.01, 3), "unit": "V"}
@@ -416,7 +476,9 @@ class _Builder:
             self.step("logic", role="logic", channels=[_short(n) for n in hall],
                       samplerate=1_000_000, duration_s=3.0, expect={"edges_min": 2},
                       derived_from="netlist HALL_* nets", text="Hall inputs toggle")
-        if self.bridges and {"arm", "duty", "disarm"} <= set(cmds):
+        if self.boost:
+            pass    # the power-stage stage switches it
+        elif self.bridges and {"arm", "duty", "disarm"} <= set(cmds):
             self.human("Motor DISCONNECTED. The next steps switch the bridge with no load "
                        f"at {getattr(self, 'v_first', 0):g} V. Confirm the phase outputs "
                        "are free.")
@@ -455,6 +517,168 @@ class _Builder:
             if pins:
                 return f"{j} pins " + ", ".join(sorted((p["pin"] for p in pins), key=int))
         return "the sensor connector"
+
+    def _open_duty(self, v_in: float, v_out: float) -> float:
+        """The open-loop duty whose ideal synchronous-boost output is v_out."""
+        mx = float((self.d.manifest or {}).get("pwm", {}).get("max_duty") or 0.9)
+        return round(min(mx, max(0.05, 1.0 - v_in / v_out)), 3)
+
+    def power_stage(self):
+        """A boost's switching tests: closed loop, open loop, then every trip."""
+        if not self.boost:
+            return
+        self.stage("power-stage", "Power stage: regulation, PWM, dead time and trips")
+        m, d, bst = self.d.manifest, self.d, self.boost
+        cmds = {c["name"] for c in m.get("commands", [])}
+        if not hasattr(self, "v_first") or not {"duty", "disarm"} <= cmds:
+            self.skip("power-stage", "needs the power-up stage and the manifest's "
+                                     "duty and disarm commands")
+            self.stages.pop()
+            return
+        saf, pwm = m.get("safety") or {}, m["pwm"]
+        vin, g = self.v_first, self.point(self.gnd)
+        out = self.point(bst["out"])
+        ov = saf.get("vout_ov_v") or next((t["threshold"] for t in m.get("trips", [])
+                                           if t.get("unit") == "V"), None)
+        if ov is None:
+            self.skip("power-stage", "manifest gives no output over-voltage level "
+                                     "(safety.vout_ov_v), so no safe open-loop duty")
+            self.stages.pop()
+            return
+        d0 = self._open_duty(vin, ov / 2)
+        v0 = vin / (1 - d0)
+        d0_src = (f"D0 = 1 - {vin:g} V / ({ov:g} V / 2): half the output over-voltage "
+                  f"level (manifest safety.vout_ov_v), synchronous boost Vout = Vin/(1-D)")
+        self.human(f"Output open: nothing on {bst['out']}'s connectors. The next steps switch "
+                   f"{bst['ic']} at {pwm.get('freq_hz', 0) / 1e6:g} MHz from the {vin:g} V "
+                   f"supply; the output reaches {ov:g} V in the over-voltage test. Hands clear.")
+        target = saf.get("vout_target_v")
+        if target and "arm" in cmds:
+            self.step("console", role="console", send="arm", expect_re="^OK ", timeout_s=2,
+                      derived_from="manifest commands[arm] safe:false: soft start into "
+                                   "the voltage loop")
+            self.step("wait", seconds=2.0)
+            self.step("console", role="console", send="status", expect_re="^OK ",
+                      timeout_s=2,
+                      fields={"vout_v": {"nominal": target,
+                                         "min": round(target * (1 - VOUT_TOL_CLOSED), 3),
+                                         "max": round(target * (1 + VOUT_TOL_CLOSED), 3),
+                                         "unit": "V"}},
+                      derived_from=f"manifest safety.vout_target_v {target:g} V "
+                                   f"+/-{VOUT_TOL_CLOSED * 100:g} %",
+                      text="the voltage loop regulates the output")
+            self.step("measure", role="psu", quantity="current",
+                      expect={"nominal": None, "min": IDLE_FLOOR_A,
+                              "max": round(0.9 * self.ilim, 4), "unit": "A"},
+                      derived_from="unloaded and regulating: below 90 % of the limit",
+                      text="input current while regulating")
+            self.step("console", role="console", send="disarm", expect_re="^OK ",
+                      timeout_s=2, derived_from="manifest commands[disarm]")
+        self.step("console", role="console", send=f"duty {d0:g}", expect_re="^OK ",
+                  timeout_s=2, derived_from=f"manifest commands[duty] safe:false; {d0_src}",
+                  text=f"open loop at D0 = {d0:g}")
+        self.step("wait", seconds=1.0)
+        self.probe("DMM", out, g, "DC volts")
+        self.step("measure", role="dmm", quantity="voltage", points={"plus": out, "minus": g},
+                  expect={"nominal": round(v0, 3), "min": round(v0 * (1 - VOUT_TOL_OPEN), 3),
+                          "max": round(v0 * (1 + VOUT_TOL_OPEN), 3), "unit": "V"},
+                  derived_from=f"duty to Vout: {vin:g} V / (1 - {d0:g}) = {v0:.2f} V "
+                               f"+/-{VOUT_TOL_OPEN * 100:g} %",
+                  text=f"{_short(bst['out'])} follows the duty")
+        outs = {o.get("role"): o.get("net") for o in pwm.get("outputs", [])}
+        lo = self.point(self._net(outs.get("hrtim_lo")) or bst["sw"])
+        hi = self.point(self._net(outs.get("hrtim_hi")) or bst["sw"])
+        dt = pwm.get("dead_time_ns") or saf.get("dead_time_ns")
+        self.human(f"Scope channel 1 on {lo['label']} and channel 2 on {hi['label']}, "
+                   "10x probes with ground springs to the nearest GND pad, DC coupled, "
+                   "full bandwidth (at least 200 MHz for the dead time).")
+        hz = float(pwm.get("freq_hz") or saf.get("pwm_hz") or 0)
+        if hz:
+            self.step("scope", role="scope", channel=1, quantity="freq",
+                      points={"plus": lo, "minus": g},
+                      expect={"nominal": hz, "min": hz * 0.98, "max": hz * 1.02, "unit": "Hz"},
+                      derived_from="manifest pwm.freq_hz +/-2%",
+                      text=f"{_short(lo['net'])} PWM frequency")
+        self.step("scope", role="scope", channel=1, quantity="duty",
+                  points={"plus": lo, "minus": g}, screenshot=True,
+                  expect={"nominal": d0, "min": round(d0 - DUTY_TOL, 3),
+                          "max": round(d0 + DUTY_TOL, 3), "unit": ""},
+                  derived_from=f"commanded duty {d0:g} +/-{DUTY_TOL:g} (the low side is on for D)",
+                  text=f"{_short(lo['net'])} duty")
+        if dt:
+            self.step("scope", role="scope", channel=1, channel2=2, quantity="deadtime",
+                      points={"plus": lo, "minus": g, "ch2": hi}, screenshot=True,
+                      expect={"nominal": float(dt), "min": round(dt - DT_SKEW_NS, 2),
+                              "max": round(dt + DT_SKEW_NS + 1.0, 2), "unit": "ns"},
+                      derived_from=f"manifest pwm.dead_time_ns {dt:g} ns: -{DT_SKEW_NS:g} ns "
+                                   f"probe skew, +{DT_SKEW_NS + 1:g} ns with the timer's round-up",
+                      text=f"dead time {_short(lo['net'])} falling to {_short(hi['net'])} rising")
+        self.step("console", role="console", send="disarm", expect_re="^OK ", timeout_s=2,
+                  derived_from="manifest commands[disarm]")
+        rating = d.voltages.get(bst["out"])
+        vdda = d.voltages.get("/VDDA") or d.voltages.get("+3V3") or 3.3
+        for t in m.get("trips", []):
+            name, thr, unit = t["name"], float(t["threshold"]), t.get("unit", "")
+            tsrc = (f"manifest trips[{name}]: {t.get('comparator', '?')} -> "
+                    f"{t.get('fault_input', '?')} at {thr:g} {unit}")
+            by_duty = unit == "V" and "OUT" in str(t.get("sense_net", "")).upper()
+            if by_duty:
+                aim = min(thr * OVP_OVERSHOOT, 0.97 * rating) if rating else thr * OVP_OVERSHOOT
+                dt_ = self._open_duty(vin, aim)
+                if aim <= thr or vin / (1 - dt_) <= thr:
+                    self.skip(f"power-stage:{name}", f"no duty up to pwm.max_duty and no "
+                              f"output under its {rating:g} V rating reaches the "
+                              f"{thr:g} V trip from {vin:g} V")
+                    continue
+            elif not self._net(t.get("sense_net")):
+                self.skip(f"power-stage:{name}", f"sense net {t.get('sense_net')!r} "
+                                                 "is not in the netlist")
+                continue
+            self.step("console", role="console", send=f"duty {d0:g}", expect_re="^OK ",
+                      timeout_s=2, derived_from=f"switching at D0 = {d0:g}: {d0_src}")
+            if by_duty:
+                self.step("console", role="console", send=f"duty {dt_:g}",
+                          expect_re=t["evt_regex"], timeout_s=5,
+                          derived_from=f"{tsrc}; duty aimed at {vin:g}/(1-{dt_:g}) = "
+                                       f"{vin / (1 - dt_):.1f} V, {OVP_OVERSHOOT:g}x the "
+                                       f"trip and under 97 % of the "
+                                       f"{_short(bst['out'])} rating",
+                          text=f"{name} trips on a real over-voltage")
+            else:
+                sp = self.point(self._net(t.get("sense_net")))
+                self.human(f"Inject on {sp['label']}: a second supply at 0 V with a "
+                           f"{INJECT_ILIM_A * 1000:g} mA limit, + through {INJECT_R_OHM} ohm "
+                           f"to {sp['label']}, - to {g['label']}. Raise it slowly until the "
+                           f"console shows the {name} trip; stop at {vdda:g} V if it does not.",
+                           provoke={"trip": name, "on": True},
+                           derived_from=f"{tsrc}, at the sense net's own scaling")
+                self.step("console", role="console", send=None, expect_re=t["evt_regex"],
+                          timeout_s=10, derived_from=tsrc, text=f"{name} trip reported")
+            self.step("console", role="console", send="status", expect_re="^OK ", timeout_s=2,
+                      fields={"outputs_on": {"nominal": 0, "min": 0, "max": 0, "unit": ""}},
+                      derived_from=f"manifest trips[{name}].outputs "
+                                   f"{t.get('outputs', 'inactive')}",
+                      text=f"{name} dropped both outputs")
+            if by_duty:
+                self.human(f"{_short(bst['out'])} stays charged near {thr:g} V and bleeds "
+                           "down through its divider; do not touch it.")
+            else:
+                self.human(f"Turn the injection to 0 V and disconnect it from {sp['label']}.",
+                           provoke={"trip": name, "on": False})
+            self.step("wait", seconds=TRIP_SETTLE_S)
+            self.step("console", role="console", send="disarm", expect_re="^OK ", timeout_s=2,
+                      derived_from="manifest commands[disarm]")
+            self.step("console", role="console", send=t.get("clear") or "clear",
+                      expect_re="^OK ", timeout_s=2,
+                      derived_from=f"manifest trips[{name}].clear, latched "
+                                   f"{str(t.get('latched', True)).lower()}",
+                      text=f"{name} clears once its comparator has fallen")
+
+    def _net(self, short: str | None) -> str | None:
+        """A manifest net name ('PWM_LO') -> the netlist's ('/PWM_LO')."""
+        if not short:
+            return None
+        return next((n for n in self.d.nets if n == short or _short(n) == short), None)
 
     def full_function(self):
         self.stage("full-function", "Full function with a motor")
@@ -504,6 +728,18 @@ class _Builder:
         saf = (d.manifest or {}).get("safety", {})
         uv = saf.get("vbus_uv_v")
         if uv is not None and uv < lo:
+            # this firmware latches input trips only while switching
+            d0 = None
+            if self.boost and "power-stage" in {st["id"] for st in self.stages}:
+                ov = saf.get("vout_ov_v")
+                d0 = self._open_duty(self.v_first, ov / 2) if ov else None
+            if d0 is not None:
+                self.step("supply", role="psu",
+                          set={"v": self.v_first, "i_limit": self.ilim, "output": True},
+                          derived_from="D0 was set for this input")
+                self.step("console", role="console", send=f"duty {d0:g}", expect_re="^OK ",
+                          timeout_s=2, derived_from="the firmware latches input trips only "
+                                                    "while switching: open loop at D0")
             self.step("supply", role="psu",
                       set={"v": round(uv - 0.5, 2), "i_limit": self.ilim, "output": True},
                       derived_from=f"manifest safety.vbus_uv_v {uv:g} V - 0.5 V")
@@ -512,6 +748,9 @@ class _Builder:
                       text=f"UV trip below {uv:g} V")
             self.step("supply", role="psu",
                       set={"v": self.v_first, "i_limit": self.ilim, "output": True})
+            if d0 is not None:
+                self.step("console", role="console", send="disarm", expect_re="^OK ",
+                          timeout_s=2, derived_from="manifest commands[disarm]")
             self.step("console", role="console", send=saf.get("fault_clear", "clear"),
                       expect_re="^OK ", timeout_s=2, derived_from="manifest safety.fault_clear")
         ov = saf.get("vbus_ov_v")
@@ -533,6 +772,7 @@ def generate(d: Design, now: datetime | None = None) -> dict:
     b.rails_stage()
     b.programming()
     b.blocks()
+    b.power_stage()
     b.full_function()
     b.limits()
     stages = [s for s in b.stages if s["steps"]]
@@ -545,6 +785,7 @@ def generate(d: Design, now: datetime | None = None) -> dict:
         "design": {"input": b.input, "gnd": b.gnd,
                    "rails": [r["net"] for r in b.rails],
                    "half_bridges": b.bridges,
+                   "boost": b.boost,
                    "vin_range": list(d.vin_range) if d.vin_range else None},
         "roles": sorted(b.roles),
         "skipped": b.skipped,

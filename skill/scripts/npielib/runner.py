@@ -220,7 +220,8 @@ def execute(run: Run, s: dict) -> dict:
                           value=v, unit=s["expect"].get("unit", ""))
     if t == "scope":
         sc = b.role("scope")
-        v = float(sc.measure(s.get("channel", 1), s["quantity"], s["points"]))
+        extra = {"channel2": s["channel2"]} if "channel2" in s else {}
+        v = float(sc.measure(s.get("channel", 1), s["quantity"], s["points"], **extra))
         caps = []
         if s.get("screenshot"):
             p = run.dir / "captures" / f"{s['id']}.png"

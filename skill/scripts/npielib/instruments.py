@@ -4,7 +4,8 @@ to a driver (reference/design.md section 4).
 Roles and the calls the runner makes:
   psu      set(v, i_limit, output), measure(quantity) -> float, off()
   dmm      measure(quantity, points) -> float
-  scope    measure(channel, quantity, points) -> float, screenshot(path)
+  scope    measure(channel, quantity, points, channel2=None) -> float, screenshot(path);
+           quantity deadtime (ns) is channel's falling edge to channel2's rising
   logic    capture(channels, samplerate, duration_s) -> {channel: edges}
   console  send(line), read_until(regex, timeout_s) -> line | None
   probe    flash(manifest, workspace) -> (ok, log)
@@ -49,6 +50,14 @@ class SimBoard:
     passes), with seeded noise inside the middle of each band. `faults` makes
     chosen steps fail: 'short:<net>' (resistance ~0, supply sits in current
     limit, rails collapse), 'rail:<net>=<volts>', 'no-banner', 'no-flash'.
+
+    A boost (the procedure's design.boost) follows its firmware: `arm`
+    regulates the output at safety.vout_target_v, `duty <d>` from off runs
+    open loop at Vin/(1-d) and is refused while regulating, and each manifest
+    trip latches - outputs off, one EVT line, `clear` refused while its cause
+    stands. An output-voltage trip fires when the output crosses its
+    threshold; any other when a person's step injects on its sense net
+    (the step's `provoke`). Input under-voltage latches only while switching.
     """
 
     def __init__(self, proc: dict, faults: list[str] | None = None, seed: int = 1):
@@ -68,7 +77,8 @@ class SimBoard:
         # the reply each console step waits for, so a hook that expects more
         # than "OK" (version -> ^OK {"board":...) gets a line that fits
         self.hooks = {s["send"].split()[0]: s["expect_re"] for st in proc["stages"]
-                      for s in st["steps"] if s["type"] == "console" and s.get("send")}
+                      for s in st["steps"] if s["type"] == "console" and s.get("send")
+                      and s["expect_re"].startswith("^OK")}
         self.faults = faults or []
         self.shorts = {f.split(":", 1)[1] for f in self.faults if f.startswith("short:")}
         self.rail_over = {}
@@ -78,8 +88,16 @@ class SimBoard:
                 self.rail_over[net] = float(v)
         self.v, self.ilim, self.on = 0.0, 0.0, False
         self.flashed = False
-        self.armed, self.duty = False, [0.0, 0.0, 0.0]
+        # one duty per half-bridge, until the manifest's duty args say otherwise
+        self.nduty = len((proc.get("design") or {}).get("half_bridges") or []) or 3
+        self.armed, self.duty = False, [0.0] * self.nduty
         self.fault_latched = None
+        self.boost = (proc.get("design") or {}).get("boost")
+        self.mode = "off"                 # boost: off, run (arm) or open (duty)
+        self.trips: list[dict] = []
+        self.injected: set[str] = set()
+        self.uv_switching = False
+        self.vout_target = self.pwm_hz = None
         self.rx: list[str] = []
         # the FPGA PWM generator's geometry: the picked ECP5 board's until an
         # fpga manifest says otherwise; the gateware model lives here so the
@@ -95,7 +113,16 @@ class SimBoard:
             self.pwm_f = float(clk.get("f_rf_actual_hz") or geo.get("f_rf_hz") or self.pwm_f)
         elif man:
             self.man_banner = man.get("uart", {}).get("banner_regex")
-            self.uv = man.get("safety", {}).get("vbus_uv_v")
+            saf = man.get("safety", {})
+            self.uv = saf.get("vbus_uv_v")
+            duty = next((c for c in man.get("commands", []) if c.get("name") == "duty"), None)
+            if duty and duty.get("args", "").count("<"):
+                self.nduty = duty["args"].count("<")
+                self.duty = [0.0] * self.nduty
+            self.trips = man.get("trips") or []
+            self.uv_switching = bool(man.get("pwm"))
+            self.vout_target = saf.get("vout_target_v")
+            self.pwm_hz = (man.get("pwm") or {}).get("freq_hz") or saf.get("pwm_hz")
 
     def pwm_running(self) -> bool:
         return bool(self.pwm_gw and self.pwm_gw.enable and max(self.pwm_gw.duty_on) > 0)
@@ -116,6 +143,55 @@ class SimBoard:
     def powered(self) -> bool:
         return self.on and not self.shorts and self.v >= 5.0
 
+    def switching(self) -> bool:
+        if not self.powered():
+            return False
+        if self.boost:
+            return self.mode in ("run", "open")
+        return self.armed and max(self.duty) > 0
+
+    def vout(self) -> float:
+        """A boost's output: regulated, Vin/(1-d) open loop, else the input."""
+        if not self.powered():
+            return 0.0
+        if self.switching() and self.mode == "run" and self.vout_target:
+            return float(self.vout_target)
+        if self.switching() and self.mode == "open":
+            return self.v / (1.0 - min(self.duty[0], 0.95))
+        return self.v
+
+    def _evt(self, name: str, regex: str | None) -> str | None:
+        for lit in (f"{name}_hw", name) if regex else (name,):
+            line = 'EVT {"trip":{"new":["%s"]}}' % lit
+            if regex is None or re.search(regex, line):
+                return line
+        return None
+
+    def trip(self, name: str, regex: str | None = None):
+        """Latch a trip: both outputs off, one EVT line."""
+        if self.fault_latched:
+            return
+        self.fault_latched = name
+        self.mode, self.armed, self.duty = "off", False, [0.0] * self.nduty
+        line = self._evt(name, regex)
+        if line:
+            self.rx.append(line)
+
+    def _check_trips(self):
+        for t in self.trips:
+            hit = t["name"] in self.injected or (
+                t.get("unit") == "V" and self.switching() and self.vout() >= t["threshold"])
+            if hit:
+                self.trip(t["name"], t.get("evt_regex"))
+
+    def provoke(self, trip: str, on: bool):
+        """A person injects on a trip's sense net (or stops)."""
+        if on:
+            self.injected.add(trip)
+            self._check_trips()
+        else:
+            self.injected.discard(trip)
+
     def reading(self, quantity: str, plus: str, minus: str) -> float:
         if quantity == "resistance":
             if plus in self.shorts:
@@ -125,6 +201,8 @@ class SimBoard:
                 return self.rng.uniform(0.0, 0.01)
             if plus in self.rail_over:
                 return self.rail_over[plus]
+            if self.boost and plus == self.boost["out"] and self.switching():
+                return self.vout() * self.rng.uniform(0.985, 0.995)
             if plus in self.follows:
                 return self.v * self.rng.uniform(0.985, 0.995)
         e = self.table.get((quantity, plus, minus))
@@ -139,8 +217,13 @@ class SimBoard:
         if now and not was:
             self.boot()
         if self.uv is not None and on and v < self.uv and self.flashed:
-            self.fault_latched = "uv"
-            self.rx.append('EVT {"fault":"uv","vbus_v":%.2f}' % v)
+            if self.uv_switching:
+                # this firmware latches input trips only while it switches
+                if self.switching():
+                    self.trip("vin_uv")
+            else:
+                self.fault_latched = "uv"
+                self.rx.append('EVT {"fault":"uv","vbus_v":%.2f}' % v)
 
     def current(self) -> float:
         if not self.on:
@@ -148,12 +231,12 @@ class SimBoard:
         if self.shorts:
             return self.ilim
         base = 0.030 * 12.0 / max(self.v, 1.0) + 0.004
-        if self.armed:
+        if self.armed or self.switching():
             base += 0.01
         return min(self.ilim, base * self.rng.uniform(0.95, 1.05))
 
     def boot(self):
-        self.armed = False
+        self.armed, self.mode = False, "off"
         if self.flashed and "no-banner" not in self.faults and self.man_banner:
             self.rx.append(_example_for(self.man_banner) + " sim")
             self.rx.append('EVT {"boot":"power"}')
@@ -166,16 +249,18 @@ class SimBoard:
         if not (self.powered() and self.flashed):
             return ""
         word = line.split()[0] if line.split() else ""
+        if self.boost and word in ("arm", "duty", "disarm", "clear", "status"):
+            return self._boost_command(word, line.split()[1:])
         if word == "arm":
             if self.fault_latched:
                 return "ERR fault latched"
             self.armed = True
         elif word == "disarm":
-            self.armed, self.duty = False, [0.0, 0.0, 0.0]
+            self.armed, self.duty = False, [0.0] * self.nduty
         elif word == "duty":
             if not self.armed:
                 return "ERR not armed"
-            self.duty = [float(x) for x in line.split()[1:]] + [0.0] * 3
+            self.duty = ([float(x) for x in line.split()[1:]] + [0.0] * self.nduty)[:self.nduty]
         elif word == "clear":
             self.fault_latched = None
         elif word == "reset":
@@ -189,6 +274,42 @@ class SimBoard:
             if re.search(want, lit):
                 return lit + ("}" if lit.count("{") > lit.count("}") else "")
         return 'OK {"sim":true}'
+
+
+    def _boost_command(self, word: str, args: list[str]) -> str:
+        if word == "arm":
+            if self.fault_latched:
+                return "ERR fault latched"
+            if self.mode != "off":
+                return "ERR state regulating: disarm first"
+            self.mode, self.armed = "run", True
+            return 'OK {"state":"softstart","target_v":%.1f}' % (self.vout_target or 0)
+        if word == "duty":
+            if self.fault_latched:
+                return "ERR fault latched"
+            if self.mode == "run":
+                return "ERR state regulating: disarm first"
+            if len(args) != self.nduty:
+                return "ERR args"
+            self.mode, self.armed = "open", True
+            self.duty = [float(x) for x in args]
+            # the reply goes out first; a trip the new duty causes follows it
+            self.rx.append('OK {"state":"open","duty":%.3f}' % self.duty[0])
+            self._check_trips()
+            return ""
+        if word == "disarm":
+            self.mode, self.armed, self.duty = "off", False, [0.0] * self.nduty
+            return 'OK {"state":"off","outputs_on":false}'
+        if word == "clear":
+            if self.fault_latched in self.injected:
+                return "ERR active comparator still high"
+            self.fault_latched = None
+            return 'OK {"trips":[]}'
+        return ('OK {"sim":true,"state":"%s","outputs_on":%s,"trips":[%s],"vbus_v":%.3f,'
+                '"vin_v":%.3f,"vout_v":%.3f,"duty":%.3f}') % (
+            self.mode, "true" if self.switching() else "false",
+            f'"{self.fault_latched}"' if self.fault_latched else "",
+            self.v, self.v, self.vout() * self.rng.uniform(0.995, 1.005), self.duty[0])
 
 
 def _example_for(regex: str) -> str:
@@ -225,9 +346,9 @@ class SimScope:
         self.b = board
         self.last = None
 
-    def measure(self, channel, quantity, points):
+    def measure(self, channel, quantity, points, channel2=None):
         net = points["plus"]["net"]
-        switching = self.b.armed and self.b.powered() and max(self.b.duty) > 0
+        switching = self.b.switching()
         pwm = self.b.pwm_running()
         if pwm and quantity in ("freq", "duty"):
             # the generator's own output: f_rf, and its widest channel's duty
@@ -237,8 +358,10 @@ class SimScope:
         elif quantity == "duty":
             val = max(self.b.duty) if switching else 0.0
             val += self.b.rng.uniform(-0.01, 0.01) if val else 0.0
-        elif quantity == "freq" and not switching:
+        elif quantity in ("freq", "deadtime") and not switching:
             val = 0.0
+        elif quantity == "freq" and self.b.pwm_hz:
+            val = float(self.b.pwm_hz) * self.b.rng.uniform(0.999, 1.001)
         else:
             val = self.b.reading(quantity, net, points["minus"]["net"]) \
                 if self.b.powered() else 0.0
@@ -281,6 +404,8 @@ class SimConsole:
 
     def human_done(self, step: dict):
         """The runner tells the sim console what a person just did."""
+        if step.get("provoke"):
+            self.b.provoke(**step["provoke"])
         if re.search(r"press", step.get("text", ""), re.I) and \
                 re.search(r"reset", step.get("text", ""), re.I):
             self.b.reset()
@@ -480,13 +605,17 @@ class ScpiDmm:
 
 class ScpiScope:
     _Q = {"vpp": "MEAS:VPP? CHAN{c}", "mean": "MEAS:VAVG? CHAN{c}",
-          "freq": "MEAS:FREQ? CHAN{c}", "duty": "MEAS:PDUT? CHAN{c}"}
+          "freq": "MEAS:FREQ? CHAN{c}", "duty": "MEAS:PDUT? CHAN{c}",
+          # channel's falling edge to channel2's rising edge, in seconds
+          "deadtime": "MEAS:FRD? CHAN{c},CHAN{c2}"}
 
     def __init__(self, cfg):
         self.i = _visa(cfg["resource"])
 
-    def measure(self, channel, quantity, points):
-        v = float(self.i.query(":" + self._Q[quantity].format(c=channel)))
+    def measure(self, channel, quantity, points, channel2=None):
+        v = float(self.i.query(":" + self._Q[quantity].format(c=channel, c2=channel2 or 2)))
+        if quantity == "deadtime":
+            return v * 1e9
         return v / 100.0 if quantity == "duty" and v > 1.0 else v
 
     def screenshot(self, path: Path):
