@@ -226,3 +226,26 @@ def test_manifest_status_and_pwm_hz_add_checks(tmp_path):
     texts = {s.get("text") for s in _steps(procgen.generate(design.load(ws)))}
     assert "firmware reads the input voltage" not in texts
     assert "PHASE_A PWM frequency" not in texts
+
+
+def test_empty_netlist_still_generates(tmp_path):
+    ws = _ws(tmp_path)
+    (ws / "kicad" / "mini-bldc.net").write_text("(export (version E) (components) (nets))\n")
+    proc = procgen.generate(design.load(ws))
+    assert proc["design"]["input"] is None and proc["design"]["gnd"] is None
+    assert proc["design"]["rails"] == [] and proc["design"]["half_bridges"] == []
+    assert {"unpowered", "power-up"} <= {k["stage"] for k in proc["skipped"]}
+    # nothing is measured on a net the design does not have
+    assert not [s for s in _steps(proc) if s.get("points")]
+    r = subprocess.run([sys.executable, str(NPIE / "procedure_gen.py"),
+                        "--workspace", str(ws)], capture_output=True, text=True)
+    assert r.returncode == 0, r.stdout + r.stderr
+
+
+def test_no_bom_still_generates(tmp_path):
+    ws = _ws(tmp_path)
+    (ws / "fab" / "BOM.csv").unlink()
+    proc = procgen.generate(design.load(ws))
+    assert "bom" not in proc["inputs"]
+    assert "BOM.csv" not in " ".join(s["text"] for s in _steps(proc, "visual"))
+    assert [s["id"] for s in proc["stages"]][:2] == ["visual", "unpowered"]
