@@ -6,8 +6,11 @@ PYTHON ?= python3
 VENV   := .venv
 PY     := $(VENV)/bin/python
 
-.PHONY: check
-check: $(VENV)/.installed
+.PHONY: check lint
+lint:
+	$(PYTHON) -m compileall -q skill tests
+
+check: lint $(VENV)/.installed
 	env -u NPIE_BENCH_HOST $(PY) -m pytest -q tests
 
 $(VENV)/.installed: requirements.txt
