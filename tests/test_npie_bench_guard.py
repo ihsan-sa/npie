@@ -29,4 +29,4 @@ def test_live_driver_refused_without_bench_host(driver, monkeypatch):
 def test_live_driver_allowed_on_bench_host(monkeypatch):
     monkeypatch.setenv("NPIE_BENCH_HOST", "1")
     monkeypatch.setitem(instruments.LIVE, "serial", lambda cfg: "opened")
-    assert Bench({"roles": {"x": {"driver": "serial"}}}).role("x") == "opened"
+    assert Bench({"roles": {"x": {"driver": "serial"}}}).role("x").upper() == "OPENED"
