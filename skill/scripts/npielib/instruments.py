@@ -27,6 +27,7 @@ exercise.
 """
 from __future__ import annotations
 
+import os
 import random
 import re
 import shutil
@@ -893,6 +894,9 @@ class Bench:
                 drv = LIVE.get(rc.get("driver"))
                 if drv is None:
                     raise BenchError(f"unknown driver {rc.get('driver')!r} for {name}")
+                if os.environ.get("NPIE_BENCH_HOST") != "1":
+                    raise BenchError(f"refusing to open the {rc.get('driver')} driver for "
+                                     f"{name}: NPIE_BENCH_HOST=1 is not set on this host")
                 self._open[name] = drv(rc)
         return self._open[name]
 
