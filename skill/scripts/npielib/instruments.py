@@ -875,6 +875,29 @@ SIM = {"psu": SimPsu, "dmm": SimDmm, "scope": SimScope, "logic": SimLogic,
        "console": SimConsole, "probe": SimProbe, "pwm": _sim_pwm, "awg": _sim_awg}
 
 
+class _Named:
+    """A driver whose failed calls raise a BenchError naming the instrument
+    (role and driver) and the call: 'psu (scpi-psu): set(v=12, ...) failed: ...'."""
+
+    def __init__(self, role: str, driver: str, inst):
+        self._role, self._driver, self._inst = role, driver, inst
+
+    def __getattr__(self, name):
+        attr = getattr(self._inst, name)
+        if not callable(attr):
+            return attr
+
+        def call(*args, **kwargs):
+            try:
+                return attr(*args, **kwargs)
+            except Exception as exc:
+                shown = ", ".join([repr(a) for a in args] +
+                                  [f"{k}={v!r}" for k, v in kwargs.items()])
+                raise BenchError(f"{self._role} ({self._driver}): {name}({shown}) failed: "
+                                 f"{type(exc).__name__}: {exc}") from exc
+        return call
+
+
 class Bench:
     """Role -> driver instance. Built lazily so a run opens only what it uses."""
 
@@ -886,7 +909,7 @@ class Bench:
     def role(self, name: str):
         if name not in self._open:
             if self.sim is not None:
-                self._open[name] = SIM[name](self.sim)
+                self._open[name] = _Named(name, "sim", SIM[name](self.sim))
             else:
                 rc = self.cfg.get("roles", {}).get(name)
                 if not rc:
@@ -897,7 +920,7 @@ class Bench:
                 if os.environ.get("NPIE_BENCH_HOST") != "1":
                     raise BenchError(f"refusing to open the {rc.get('driver')} driver for "
                                      f"{name}: NPIE_BENCH_HOST=1 is not set on this host")
-                self._open[name] = drv(rc)
+                self._open[name] = _Named(name, rc["driver"], drv(rc))
         return self._open[name]
 
     def safe_off(self) -> bool:
