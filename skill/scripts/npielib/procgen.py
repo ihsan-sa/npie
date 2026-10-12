@@ -221,14 +221,19 @@ class _Builder:
         pol = [r for r in d.refs("D") + d.refs("U") + d.refs("Q")]
         ecaps = [r for r in d.refs("C") if re.search(r"\d+\s*uF\s+\d+V", d.value(r))
                  and re.search(r"CAP-TH|CP_|Elec", d.components[r]["footprint"])]
-        self.human("Check the board for damage, solder bridges on fine-pitch ICs "
-                   f"({', '.join(d.refs('U'))}) and missing parts against fab/BOM.csv.")
+        ics = f" ({', '.join(d.refs('U'))})" if d.refs("U") else ""
+        against = "fab/BOM.csv" if "bom" in d.inputs else "the schematic (the workspace has no BOM)"
+        self.human(f"Check the board for damage, solder bridges on fine-pitch ICs{ics} "
+                   f"and missing parts against {against}.")
         self.human("Check orientation of polarised parts: "
                    + ", ".join(f"{r} {d.value(r)}" for r in pol + ecaps) + ".")
 
     def unpowered(self):
         self.stage("unpowered", "Unpowered resistance and diode checks")
         self.human("Board unpowered, every cable off. Discharge the input capacitors.")
+        if not self.gnd:
+            self.skip("unpowered", "no GND net in the netlist: nothing to measure against")
+            return
         g = self.point(self.gnd)
         nets = ([self.input] if self.input else []) + [r["net"] for r in self.rails]
         nets += [b["phase"] for b in self.bridges]
@@ -415,7 +420,7 @@ class _Builder:
     def blocks(self):
         self.stage("blocks", "Per-block tests")
         d, m = self.d, self.d.manifest
-        g = self.point(self.gnd)
+        g = self.point(self.gnd) if self.gnd else None
         for h in (m or {}).get("test_hooks", []):
             self.step("console", role="console", send=h["send"], expect_re=h["expect"],
                       timeout_s=h.get("timeout_s", 5),
@@ -432,7 +437,7 @@ class _Builder:
                       text="firmware reads the input voltage")
         for u in d.refs("U"):
             f = {p["func"]: p["net"] for p in d.pins_of(u)}
-            if "OUT" in f and "REF1" in f and "REF2" in f:
+            if g and "OUT" in f and "REF1" in f and "REF2" in f:
                 vref = [0.0 if n == self.gnd else d.voltages.get(n) for n in (f["REF1"], f["REF2"])]
                 if None in vref:
                     continue
