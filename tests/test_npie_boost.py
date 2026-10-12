@@ -13,6 +13,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
 NPIE = ROOT / "skill" / "scripts"
 FIX = ROOT / "tests" / "fixtures" / "npie" / "mini-bldc"
@@ -210,3 +212,29 @@ def test_a_trip_the_bench_cannot_reach_is_skipped_with_its_reason(tmp_path):
     assert not [s for s in steps if s.get("send") == "clear" or s.get("provoke")]
     # the open-loop checks before the trips are still there
     assert any(s.get("quantity") == "deadtime" for s in steps)
+
+
+def test_scpi_scope_asks_for_dead_time_as_falling_to_rising_in_ns(monkeypatch):
+    """LEARNINGS 2026-10-08 [scpi] verify-later: the scope's dead-time query.
+
+    The part that needs no scope: the driver sends MEAS:FRD? with channel first
+    and channel2 second (falling edge of the first to rising of the second),
+    and turns the scope's seconds into the ns the procedure's limits use. What
+    the real scope answers, and its sign, stays a first-bench check.
+    """
+    class Scope:
+        def __init__(self):
+            self.sent = []
+
+        def query(self, cmd):
+            self.sent.append(cmd)
+            return "1.0E-08"                      # 10 ns, as a scope writes it
+
+    inst = Scope()
+    monkeypatch.setattr(instruments, "_visa", lambda resource: inst)
+    scope = instruments.ScpiScope({"resource": "sim"})
+    assert scope.measure(1, "deadtime", {}, channel2=2) == pytest.approx(10.0)
+    assert scope.measure(3, "deadtime", {}, channel2=4) == pytest.approx(10.0)
+    assert inst.sent == [":MEAS:FRD? CHAN1,CHAN2", ":MEAS:FRD? CHAN3,CHAN4"]
+    # the 8-13 ns window the procedure expects holds a nominal reading
+    assert 8.0 <= scope.measure(1, "deadtime", {}) <= 13.0
