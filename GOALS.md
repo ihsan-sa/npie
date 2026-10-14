@@ -2,6 +2,15 @@
 
 npie is a Claude Code skill that brings up and tests a circuit board. It writes a staged bring-up and qualification procedure whose pass/fail limits come from the board's design, runs it through one instrument driver layer, and records every run with a report PDF; it runs on a simulated bench anywhere and opens real instruments only on a marked bench host.
 
+## Standing goals
+
+Drafted by a dispatch run from the paragraph above, for the owner to keep, edit or replace.
+
+- **Limits from the design:** every pass/fail limit in a generated procedure traces to the board's design files.
+- **One driver layer:** every instrument, real or simulated, is driven through `npielib/instruments.py`.
+- **Every run on record:** every run leaves a report PDF.
+- **Safe anywhere:** the whole skill runs on a simulated bench anywhere, and opens real instruments only on a marked bench host.
+
 ## Proposed goals
 
 Filed by runs. Each says what done looks like as something a run can check, and keeps its status (open, done, failed, dropped) with the pull requests that moved it. At most three are open at once.
