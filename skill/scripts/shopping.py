@@ -124,6 +124,29 @@ def derive(proc: dict, manifest: dict | None) -> tuple[list, list]:
                    "spec": f"{probe}; a cable to fit {fl.get('connector', 'the SWD header')}",
                    "steps": [st["id"] for _, st in by["probe"]]})
 
+    if "esp32" in by:
+        uf = (proc.get("design") or {}).get("usb_first") or {}
+        pd = uf.get("pd") or {}
+        volts = [v for v in (pd.get("contract_v"), pd.get("fallback_v")) if v]
+        eq.append({"role": "esp32", "what": "a laptop or server with a free USB port",
+                   "spec": "Python with the npie requirements and esptool; it finds the board "
+                           f"by the bridge's VID:PID {uf.get('vid_pid', '1a86:7523')}",
+                   "steps": [st["id"] for _, st in by["esp32"]]})
+        parts.append({"what": "USB-C data cable", "qty": 1,
+                      "spec": "USB 2.0 data lines (a charge-only cable never enumerates)",
+                      "steps": [st["id"] for _, st in by["esp32"]][:1]})
+        plug = [st["id"] for _, st in _steps(proc) if (st.get("plug") or {}).get("charger")]
+        if plug:
+            parts.append({"what": "USB-C PD charger", "qty": 1,
+                          "spec": (f"offers {' or '.join(f'{v:g} V' for v in volts)}"
+                                   + (" with EPR, and an EPR-rated (5 A, 48 V) cable" if any(v > 20 for v in volts)
+                                      else "")) if volts else "the board's PD contract",
+                          "steps": plug})
+        spk = [st["id"] for _, st in _steps(proc) if (st.get("plug") or {}).get("speakers")]
+        if spk:
+            parts.append({"what": "passive speakers and a powered sub", "qty": 1,
+                          "spec": "a pair rated for the amp's output, speaker wire, an RCA lead",
+                          "steps": spk})
     meas = [st["id"] for _, st in by.get("dmm", []) + by.get("scope", [])]
     if meas:
         parts.append({"what": "micro hook clips / test-point grabbers", "qty": 4,

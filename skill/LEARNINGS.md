@@ -64,3 +64,12 @@ while `arm` regulates. Its input trips latch only while switching.
 ScpiScope reads `deadtime` as `MEAS:FRD? CHAN1,CHAN2` (falling-to-rising delay,
 seconds), written from the generic Rigol-style set and never sent to a scope.
 First bench run on PCB-0026-A: check the query and its sign on the real scope.
+
+## 2026-10-14 [serial][fwe] verify-later: the ESP32 driver and npie-selftest/1
+The esp32 driver (CH340 by VID:PID, esptool as `python -m esptool`, reset
+over RTS/DTR, line console over USB or TCP) is written against esptool's
+documented CLI and has met no board: hifi-lite/hifi-max are not built and the
+firmware's `st` commands do not exist yet. Only the sim twin and an in-process
+TCP loopback are tested. First real run: check the reset leaves the app
+running (not the ROM bootloader), esptool v5 still takes `write_flash`, and
+the CH340 shows up as 1a86:7523 on both the laptop and the server.

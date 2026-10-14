@@ -16,13 +16,16 @@ confirm --fail fails the step and ends the run.
 --dry-run runs against the simulated bench (npielib/instruments.SimBoard): it
 opens nothing and runs anywhere. It confirms human steps itself as "sim"
 unless --hold, which stops at them like a real bench. --fault injects a
-simulated fault (short:<net>, rail:<net>=<V>, no-banner, no-flash).
+simulated fault (short:<net>, rail:<net>=<V>, no-banner, no-flash; on a
+USB-first board also no-usb, tap:<name> and pd:<volts>, the most the
+charger offers).
 --bench drives real instruments and refuses unless NPIE_BENCH_HOST=1 is set,
 which only the bench host sets (reference/bench-hosts.md): the box never
 opens an instrument.
 
 On any failed step or instrument error the supply outputs go off before the
-run stops. Prints JSON {ok, run, status, cursor, awaiting?, failed?, ...}.
+run stops (a USB-first board has no bench supply: it stays on its USB or
+charger power, and the record says so). Prints JSON {ok, run, status, cursor, awaiting?, failed?, ...}.
 Exit 0 passed, 1 failed or awaiting a person (status says which), 2 error or
 refusal (stale procedure, wrong step, aborted on an instrument error).
 """

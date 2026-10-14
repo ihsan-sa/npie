@@ -114,6 +114,29 @@ each limit comes from:
    maximum input is applied; over-voltage tests beyond it are listed as
    not run, with the reason.
 
+**USB-first audio boards** (the hi-fi streamer amp) get a different, shorter
+procedure. A board is one when its netlist has an ESP32-WROVER, a CH340 on a
+USB-C, a CH224A PD sink, a PCM1863 or PCM1808 loopback ADC and a TAS5825M or
+TPA3245 amp. There is no bench supply and no meter: the board runs from the
+host's USB port, then from its PD charger, and its own loopback ADC measures
+everything (fwe-selftest.md is the firmware's side).
+
+- **usb** (5 V from the host only): a person plugs the board's USB-C into the
+  host; the CH340 enumerates by VID:PID; esptool flashes; the app boots to
+  its banner; `st rails` reads VBUS and the 3.3 V rail; `st tone` plays a
+  tone into each `TAP_DAC_*` net and checks level, frequency and THD+N. On a
+  one-port board, `st net` gives the Wi-Fi console's address.
+- **pd** (the charger): a person plugs the PD charger in (on a one-port
+  board in place of the host's cable, and the console moves to TCP); `st pd`
+  checks the contract (20 V on Lite; 28 V EPR or 20 V fallback on Plus/Max,
+  from the constraints `pd-sink` block); `st rails` the amp rail; a person
+  connects the speakers; `st tone` into each `TAP_SPK_*` and `TAP_SUB*` net;
+  a person confirms every output played it.
+
+The rules and the numbers are in procgen.py's docstring. A speaker output
+with no tap is listed as skipped: measuring it needs a bench meter, which is
+not generated yet.
+
 Every measured step carries `expect` = {nominal, min, max, unit} and a
 `derived_from` string naming the design fact it came from (`constraints
 voltages[+5V]=5`, `power_tree idle`, `manifest safety.vbus_uv_v`), so a
@@ -134,6 +157,10 @@ generator applies and records.
 | `logic` | sigrok capture, decode, compare (edges seen, frequency) | no |
 | `flash` | run the manifest's flash command for the bench's probe | no |
 | `console` | send a line, match the reply (`OK <json>`), check JSON fields against limits | no |
+| `usb` | find the board's USB serial bridge by VID:PID | no |
+| `boot` | reset an ESP32 into its app, read the boot log to the banner | no |
+| `selftest` | one `st <test>` exchange (npie-selftest/1), reply fields against limits | no |
+| `connect` | move the ESP32's console to TCP (Wi-Fi) | no |
 | `wait` | settle time | no |
 
 A step that energises something risky (`safe: false` manifest commands, the
@@ -201,6 +228,7 @@ roles:
   probe:   {driver: swd, tool: probe-rs}
   pwm:     {driver: fwe-pwm8, port: /dev/ttyUSB1, baud: 115200, f_rf_hz: 13560267.8}
   awg:     {driver: scpi-sdg, resource: "TCPIP0::192.168.1.60::INSTR"}
+  esp32:   {driver: esp32, port: auto, vid_pid: "1a86:7523", baud: 115200}
 ```
 
 Drivers (`scripts/npielib/instruments.py`), each a small class per role:
@@ -221,6 +249,14 @@ Drivers (`scripts/npielib/instruments.py`), each a small class per role:
   `Cn:OUTP`, `MODE PHASE-LOCKED`), every setting read back.
 - **swd** runs the manifest's `flash.commands[<tool>]` with `{elf}` filled
   in; the tool comes from bench.yaml.
+- **esp32** is an ESP32 behind a CH340 on the board's own USB-C. `port:
+  auto` finds it by VID:PID (`serial:` picks one of two boards on a host), so
+  no host-specific path is written down. It flashes with esptool (`python -m
+  esptool`, needed only on a host that flashes), resets into the app over
+  RTS/DTR, reads the boot log and runs `npie-selftest/1` (fwe-selftest.md).
+  Its console is a pluggable line transport: USB serial, or TCP once the app
+  is on Wi-Fi (`transport: tcp, host:, tcp_port:` in bench.yaml, or a
+  `connect` step mid-run).
 - **sim** - every role has a simulated driver backed by one `SimBoard`
   model: the supply's setpoint drives rail voltages, the idle current and
   the console, all from the same procedure's expected values, with seeded
@@ -230,6 +266,11 @@ Drivers (`scripts/npielib/instruments.py`), each a small class per role:
   The pwm and awg sims are protocol models (the gateware's register file
   byte for byte, the SDG's SCPI) under the live driver classes, and the
   simulated scope reads f_rf and duty off the PWM generator while it runs.
+  The esp32 sim is the live `Esp32` class over a simulated transport,
+  bridge and flasher, talking to a model of the audio board (`HifiModel`):
+  what is plugged in follows the human steps' `plug`, the amp rail waits
+  for a PD contract, and each tone comes back at the design's level. Its
+  faults are `no-usb`, `tap:<name>` and `pd:<volts>`.
 
 The tests run only against `sim`. No driver is ever opened against real
 hardware from the box (section 5).
@@ -245,6 +286,12 @@ path to the laptop's hardware. Other hosts (a Pi at the bench, an adapter
 board) and their costs are in `bench-hosts.md`. Any of them that links the
 box to lab equipment, a USB device, a network host or a tunnel is on the
 owner's approval list and is not wired by this skill.
+
+A USB-first board needs no instruments, only a host with a USB port, so
+the server may be its bench host too (the owner's flow: plug it into a
+laptop or the server). The same code runs on either: the board is found by
+VID:PID and live runs still need `NPIE_BENCH_HOST=1`. npie never configures
+a host for this; bench-hosts.md lists what a host needs.
 
 ## 6. Reports
 
@@ -273,6 +320,7 @@ npie reads only `firmware/fwe-manifest.json` (schema `fwe-manifest/1`,
 owned by /fwe; see its reference/manifest.md). It uses: `flash.commands`,
 `flash.connector`, `uart` (connector, pins, baud, banner_regex),
 `commands` (names, `safe`), `test_hooks` (send, expect, timeout_s, needs),
+`flash.esptool` and `selftest` on a USB-first board (fwe-selftest.md),
 `safety` (vbus_uv_v, vbus_ov_v, i_trip_a, vout_target_v, vout_ov_v, pwm_hz),
 `pwm` (outputs, freq_hz, dead_time_ns, max_duty), `trips` (name, sense_net,
 threshold, unit, evt_regex, clear), `artifact.sha256[<kind>]` (recorded in

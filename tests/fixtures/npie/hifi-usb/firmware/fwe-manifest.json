@@ -1,0 +1,70 @@
+{
+ "schema": "fwe-manifest/1",
+ "board": "hifi-usb",
+ "version": "0.1.0",
+ "stage": "bringup",
+ "target": "esp32",
+ "artifact": {
+  "bin": "build/hifi.bin",
+  "sha256": {
+   "bin": "0000000000000000000000000000000000000000000000000000000000000000"
+  }
+ },
+ "flash": {
+  "interface": "usb-uart",
+  "connector": "J1",
+  "esptool": {
+   "chip": "esp32",
+   "baud": 460800,
+   "images": [
+    {
+     "offset": "0x1000",
+     "file": "build/bootloader.bin"
+    },
+    {
+     "offset": "0x8000",
+     "file": "build/partition-table.bin"
+    },
+    {
+     "offset": "0x10000",
+     "file": "build/hifi.bin"
+    }
+   ]
+  }
+ },
+ "uart": {
+  "connector": "J1",
+  "bridge": "CH340C",
+  "baud": 115200,
+  "format": "8N1",
+  "banner_regex": "^hifi-fw "
+ },
+ "selftest": {
+  "contract": "npie-selftest/1",
+  "usb": {
+   "vid_pid": "1a86:7523",
+   "baud": 115200
+  },
+  "tcp": {
+   "port": 3333
+  },
+  "taps": {
+   "dac_l": "VINL1",
+   "dac_r": "VINR1",
+   "sub": "VINL2",
+   "spk_l": "VINL3",
+   "spk_r": "VINR3"
+  },
+  "tests": [
+   "rails",
+   "pd",
+   "tone",
+   "net"
+  ]
+ },
+ "commands": [],
+ "verified": {
+  "build": false,
+  "hardware": false
+ }
+}

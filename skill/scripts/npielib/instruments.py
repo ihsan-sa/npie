@@ -12,11 +12,17 @@ Roles and the calls the runner makes:
   pwm      set(f_hz, duty, phase_deg, enable) -> applied, off()
   awg      set(channel, wave, f_hz, vpp, offset, duty, phase_deg, load, output)
            -> applied, off()
+  esp32    enumerate(), flash(manifest, workspace), boot(banner_re, timeout_s),
+           selftest(test, args, timeout_s), connect(transport, host, port),
+           send/read_until like console, off()
 
 Drivers: scpi-psu/scpi-dmm/scpi-scope/scpi-sdg (pyvisa + pyvisa-py), sigrok
 (sigrok-cli), serial (pyserial), fwe-pwm8 (pyserial, the FPGA PWM
-generator's register protocol), swd (the manifest's flash command), and sim
-for every role. The pwm and awg sims are models of the instrument's own
+generator's register protocol), swd (the manifest's flash command), esp32
+(an ESP32 behind a CH340 on the board's USB-C, found by VID:PID, flashed by
+esptool, its console over USB serial or TCP), and sim for every role. The
+esp32 sim is the live Esp32 class over a simulated transport and a model of
+the audio board (HifiModel). The pwm and awg sims are models of the instrument's own
 protocol (bytes for the gateware, SCPI for the SDG) with the live driver
 class on top, so the tests exercise the code a real bench runs. pyvisa and
 pyserial are imported only when a live driver is built, so the box - which
@@ -27,6 +33,7 @@ exercise.
 """
 from __future__ import annotations
 
+import json
 import os
 import random
 import re
@@ -106,6 +113,8 @@ class SimBoard:
         self.pwm_n, self.pwm_f = 56, 13.56e6
         self.pwm_gw: Pwm8Gateware | None = None
         self.awg_model: SdgModel | None = None
+        uf = (proc.get("design") or {}).get("usb_first")
+        self.hifi = HifiModel(uf, self.faults, self.rng) if uf else None
 
     def set_manifest(self, man: dict | None):
         if man and man.get("kind") == "fpga":
@@ -407,9 +416,169 @@ class SimConsole:
         """The runner tells the sim console what a person just did."""
         if step.get("provoke"):
             self.b.provoke(**step["provoke"])
+        if step.get("plug") and self.b.hifi:
+            self.b.hifi.plug(**step["plug"])
         if re.search(r"press", step.get("text", ""), re.I) and \
                 re.search(r"reset", step.get("text", ""), re.I):
             self.b.reset()
+
+
+class HifiModel:
+    """The USB-first audio board behind the simulated ESP32 (npie-selftest/1).
+
+    What is plugged in (`usb`, `charger`, `speakers`) follows the human steps'
+    `plug`. USB alone powers the logic from 5 V; the amp rail stays off until
+    the CH224A holds a PD contract. A tone played into a tap comes back
+    through the loopback ADC at the design's level (procedure
+    design.usb_first), with seeded noise well inside the limits. Faults:
+    'no-usb' (the CH340 never enumerates), 'tap:<name>' (a dead tap),
+    'pd:<volts>' (the charger offers nothing above that).
+    """
+
+    IP, PORT = "192.0.2.10", 3333       # TEST-NET-1: never a real host
+
+    def __init__(self, uf: dict, faults: list[str], rng: random.Random):
+        self.uf, self.faults, self.rng = uf, faults, rng
+        self.taps = {t["name"]: t for t in uf.get("taps", [])}
+        self.dead = {f[4:] for f in faults if f.startswith("tap:")}
+        cap = next((float(f[3:]) for f in faults if f.startswith("pd:")), None)
+        self.charger_max = cap if cap is not None else float(uf.get("pd", {}).get("contract_v") or 20)
+        self.usb = self.charger = self.speakers = False
+        self.flashed = self.booted = False
+        self.link: str | None = None        # the transport the host holds: usb or tcp
+
+    def plug(self, **what):
+        for k, v in what.items():
+            setattr(self, k, bool(v))
+        # a flashed app boots on whatever power is there; a pulled cable drops its link
+        self.booted = self.powered() and self.flashed
+        if not self.powered() or (self.link == "usb" and not self.usb):
+            self.link = None
+
+    def powered(self) -> bool:
+        return self.usb or self.charger
+
+    def contract(self) -> tuple[float, bool]:
+        """The CH224A's negotiated volts and whether it is an EPR contract."""
+        if not self.charger:
+            return 5.0, False
+        pd = self.uf.get("pd") or {}
+        for v in (pd.get("contract_v"), pd.get("fallback_v")):
+            if v and self.charger_max >= float(v):
+                return float(v), float(v) > 20
+        return min(self.charger_max, 20.0), False
+
+    def vamp(self) -> float:
+        return self.contract()[0] if self.charger else 0.0
+
+    def ports(self) -> list:
+        if not self.usb or "no-usb" in self.faults:
+            return []
+        vid, pid = (int(x, 16) for x in self.uf.get("vid_pid", CH340_VID_PID).split(":"))
+        return [_Port("/dev/sim-ch340", vid, pid, "sim")]
+
+    def _n(self, v, frac):
+        return v * self.rng.uniform(1 - frac, 1 + frac)
+
+    def command(self, line: str) -> str:
+        if not (self.powered() and self.booted):
+            return ""
+        w = line.split()
+        if w[:1] != ["st"] or len(w) < 2:
+            return "ERR unknown command"
+        test, args = w[1], w[2:]
+        if test == "rails":
+            v_in = self.contract()[0]
+            return 'OK {"test":"rails","v3v3_v":%.3f,"vbus_v":%.3f,"vamp_v":%.3f}' % (
+                self._n(3.30, 0.005), self._n(v_in, 0.005), self._n(self.vamp(), 0.005))
+        if test == "pd":
+            v, epr = self.contract()
+            return 'OK {"test":"pd","contract_v":%.2f,"epr":%s,"source":"%s"}' % (
+                self._n(v, 0.003), "true" if epr else "false",
+                "charger" if self.charger else "usb-host")
+        if test == "net":
+            if not self.flashed:
+                return "ERR wifi not joined"
+            return 'OK {"test":"net","ip":"%s","port":%d,"rssi_dbm":%d}' % (
+                self.IP, self.PORT, self.rng.randint(-62, -48))
+        if test == "tone":
+            if len(args) != 3 or args[0] not in self.taps:
+                return "ERR tone <tap> <freq_hz> <level_dbfs>"
+            t, f, dbfs = self.taps[args[0]], float(args[1]), float(args[2])
+            live = args[0] not in self.dead and (not t.get("needs_amp") or self.vamp() > 0)
+            vrms = (self.uf["dac_fs_vrms"] * 10 ** ((dbfs + t["gain_db"]) / 20)
+                    * 10 ** (self.rng.uniform(-0.15, 0.15) / 20)) if live else 1e-4
+            thdn = t["thdn_db_max"] - self.rng.uniform(6, 10) if live else -12.0
+            return ('OK {"test":"tone","tap":"%s","freq_hz":%.2f,"vrms":%.5f,"thdn_db":%.1f}'
+                    % (args[0], f * (1 + self.rng.uniform(-2e-4, 2e-4)), vrms, thdn))
+        return f"ERR unknown test {test}"
+
+
+class _Port:
+    """What pyserial's list_ports gives: device, vid, pid, serial_number."""
+
+    def __init__(self, device, vid, pid, serial_number):
+        self.device, self.vid, self.pid, self.serial_number = device, vid, pid, serial_number
+
+
+class _SimLines:
+    """A line transport to the simulated ESP32: what a CH340 or a TCP socket carries."""
+
+    def __init__(self, board: SimBoard, kind: str, host=None, port=None):
+        h = board.hifi
+        if kind == "usb" and not h.ports():
+            raise BenchError("sim: no CH340 on the bus")
+        if kind == "tcp" and not (h.powered() and h.booted and h.flashed
+                                  and (host, int(port or 0)) == (h.IP, h.PORT)):
+            raise BenchError(f"sim: connection to {host}:{port} refused")
+        self.b, self.kind = board, kind
+        h.link = kind
+
+    def _live(self) -> bool:
+        return self.b.hifi.link == self.kind
+
+    def write_line(self, line: str):
+        if self._live():
+            reply = self.b.hifi.command(line)
+            if reply:
+                self.b.rx.append(reply)
+
+    def readline(self, timeout_s: float) -> str | None:
+        return self.b.rx.pop(0) if self._live() and self.b.rx else None
+
+    def reset_into_app(self):
+        h = self.b.hifi
+        if self.kind != "usb":
+            raise BenchError("a reset needs the USB link (RTS/DTR)")
+        self.b.rx.clear()
+        h.booted = h.powered()
+        if not h.booted:
+            return
+        self.b.rx += ["ets Jun  8 2016 00:22:57", "rst:0x1 (POWERON_RESET),boot:0x13 (SPI_FAST_FLASH_BOOT)"]
+        if h.flashed:
+            self.b.rx += ["I (312) cpu_start: Pro cpu up."]
+            if "no-banner" not in self.b.faults:
+                self.b.rx.append(_example_for(self.b.man_banner or "^app ") + " sim")
+        else:
+            self.b.rx.append("invalid header: 0xffffffff")
+
+    def close(self):
+        if self._live():
+            self.b.hifi.link = None
+
+
+def _sim_esp32(board: SimBoard):
+    def flasher(port, manifest, workspace, baud):
+        h = board.hifi
+        if "no-flash" in board.faults or not h.ports():
+            return False, "sim: A fatal error occurred: Failed to connect to ESP32"
+        h.flashed = True
+        h.booted = h.powered()           # --after hard_reset starts the app
+        return True, f"sim: esptool write_flash on {port}, hash of data verified, hard reset"
+    return Esp32({"driver": "sim"}, ports=lambda: board.hifi.ports(),
+                 open_usb=lambda port, baud: _SimLines(board, "usb"),
+                 open_tcp=lambda host, port: _SimLines(board, "tcp", host, port),
+                 flasher=flasher)
 
 
 class Pwm8Gateware:
@@ -868,11 +1037,235 @@ class SwdProbe:
         return r.returncode == 0, (r.stdout + r.stderr)[-2000:]
 
 
+# npie-selftest/1 (reference/fwe-selftest.md): an ESP32 behind a CH340 on the
+# board's own USB-C, or the same console over TCP once the app is on Wi-Fi.
+CH340_VID_PID = "1a86:7523"
+
+
+def find_usb_port(vid_pid: str, ports: list, serial_number: str | None = None) -> str:
+    """The one serial port whose USB VID:PID (and serial, if given) match.
+    By VID:PID, not a path, so any host (laptop or server) finds the board."""
+    vid, pid = (int(x, 16) for x in vid_pid.split(":"))
+    hits = [p for p in ports if (p.vid, p.pid) == (vid, pid)
+            and (serial_number is None or p.serial_number == serial_number)]
+    if not hits:
+        raise BenchError(f"no USB serial device {vid_pid} on this host: is the board's "
+                         "USB-C in, with a data cable (not charge-only)?")
+    if len(hits) > 1:
+        raise BenchError(f"{len(hits)} devices {vid_pid} on this host "
+                         f"({', '.join(p.device for p in hits)}): set port or serial "
+                         "for the esp32 role in bench.yaml")
+    return hits[0].device
+
+
+def _host_ports() -> list:
+    try:
+        from serial.tools import list_ports
+    except ImportError as exc:
+        raise BenchError("pyserial is not installed on this host") from exc
+    return list(list_ports.comports())
+
+
+class _SerialLines:
+    waits = True        # readline polls a real line; the sim answers at once
+
+    def __init__(self, port: str, baud: int):
+        try:
+            import serial
+        except ImportError as exc:
+            raise BenchError("pyserial is not installed on this host") from exc
+        self.s = serial.Serial(port, baud, timeout=0.1)
+
+    def write_line(self, line: str):
+        self.s.write((line + "\n").encode("ascii"))
+
+    def readline(self, timeout_s: float) -> str | None:
+        raw = self.s.readline()
+        return raw.decode("ascii", "replace").rstrip("\r\n") if raw else None
+
+    def reset_into_app(self):
+        # esptool's hard reset: IO0 high (DTR off), EN pulsed low through RTS
+        self.s.dtr = False
+        self.s.rts = True
+        time.sleep(0.1)
+        self.s.rts = False
+
+    def close(self):
+        self.s.close()
+
+
+class _TcpLines:
+    waits = True
+
+    def __init__(self, host: str, port: int):
+        import socket
+        try:
+            self.k = socket.create_connection((host, int(port)), timeout=5)
+        except OSError as exc:
+            raise BenchError(f"cannot reach the board's console at {host}:{port}: {exc}") from exc
+        self.k.settimeout(0.1)
+        self.buf = b""
+
+    def write_line(self, line: str):
+        self.k.sendall((line + "\n").encode("ascii"))
+
+    def readline(self, timeout_s: float) -> str | None:
+        import socket
+        while b"\n" not in self.buf:
+            try:
+                chunk = self.k.recv(4096)
+            except socket.timeout:
+                return None
+            if not chunk:
+                return None
+            self.buf += chunk
+        raw, self.buf = self.buf.split(b"\n", 1)
+        return raw.decode("ascii", "replace").rstrip("\r")
+
+    def reset_into_app(self):
+        raise BenchError("a reset needs the USB link (RTS/DTR), not TCP")
+
+    def close(self):
+        self.k.close()
+
+
+def _esptool_flash(port: str, manifest: dict, workspace, baud: int) -> tuple[bool, str]:
+    """Write the manifest's flash.esptool images. esptool runs as `python -m
+    esptool`, so it is needed only on a bench host that flashes."""
+    import importlib.util
+    import sys
+    if importlib.util.find_spec("esptool") is None:
+        raise BenchError("esptool is not installed on this host (pip install esptool)")
+    et = (manifest.get("flash") or {}).get("esptool") or {}
+    if not et.get("images"):
+        raise BenchError("manifest has no flash.esptool.images")
+    fw = Path(workspace) / "firmware"
+    argv = [sys.executable, "-m", "esptool", "--chip", et.get("chip", "esp32"),
+            "--port", port, "--baud", str(et.get("baud", baud)),
+            "--before", "default_reset", "--after", "hard_reset", "write_flash"]
+    for img in et["images"]:
+        argv += [str(img["offset"]), str(fw / img["file"])]
+    r = subprocess.run(argv, capture_output=True, text=True, timeout=300)
+    return r.returncode == 0, (r.stdout + r.stderr)[-2000:]
+
+
+class Esp32:
+    """The esp32 role: find, flash, reset and self-test an ESP32 over its
+    console, which is a pluggable line transport (USB serial or TCP).
+
+      enumerate() -> {port, vid_pid}       the CH340, found by VID:PID
+      flash(manifest, workspace) -> (ok, log)   esptool over that port
+      boot(banner_re, timeout_s) -> (ok, log)   reset into the app, read its boot log
+      selftest(test, args, timeout_s) -> {..} | None   `st <test> ..` -> `OK {json}`
+      connect("tcp", host, port)           move the console to TCP
+      send(line), read_until(regex, timeout_s)  console-compatible, so the
+                                           role also serves console steps
+
+    bench.yaml: {driver: esp32, port: auto | /dev/..., vid_pid: "1a86:7523",
+    serial: <usb serial, when two boards share a host>, baud: 115200,
+    transport: usb | tcp, host: <ip>, tcp_port: 3333}. The sim builds the same
+    class over its own transport, ports and flasher.
+    """
+
+    def __init__(self, cfg: dict, *, ports=None, open_usb=None, open_tcp=None, flasher=None):
+        self.cfg = cfg
+        self.vid_pid = cfg.get("vid_pid", CH340_VID_PID)
+        self.baud = int(cfg.get("baud", 115200))
+        self._ports = ports or _host_ports
+        self._open_usb = open_usb or _SerialLines
+        self._open_tcp = open_tcp or _TcpLines
+        self._flasher = flasher or _esptool_flash
+        self.link, self.transport, self.buf = None, None, []
+        if cfg.get("transport") == "tcp":
+            self.connect("tcp", cfg.get("host"), cfg.get("tcp_port", 3333))
+
+    def enumerate(self) -> dict:
+        port = self.cfg.get("port", "auto")
+        if port == "auto":
+            port = find_usb_port(self.vid_pid, self._ports(), self.cfg.get("serial"))
+        return {"port": port, "vid_pid": self.vid_pid}
+
+    def _drop(self):
+        if self.link is not None:
+            self.link.close()
+        self.link, self.transport, self.buf = None, None, []
+
+    def _console(self):
+        if self.link is None:
+            self.link, self.transport = self._open_usb(self.enumerate()["port"], self.baud), "usb"
+        return self.link
+
+    def connect(self, transport: str, host=None, port=None) -> dict:
+        """Move the console to TCP (the USB link opens by itself when needed)."""
+        if transport != "tcp" or not host:
+            raise BenchError(f"connect: only tcp with a host, not {transport} {host}")
+        self._drop()
+        self.link, self.transport = self._open_tcp(host, int(port or 3333)), "tcp"
+        return {"transport": "tcp", "host": host, "port": int(port or 3333)}
+
+    def flash(self, manifest, workspace):
+        self._drop()                    # esptool needs the port to itself
+        return self._flasher(self.enumerate()["port"], manifest, workspace, self.baud)
+
+    def boot(self, banner_re: str, timeout_s: float) -> tuple[bool, list[str]]:
+        link = self._console()
+        self.buf = []
+        link.reset_into_app()
+        pat, end, log = re.compile(banner_re), time.monotonic() + timeout_s, []
+        while True:
+            line = link.readline(timeout_s)
+            if line is not None:
+                log.append(line)
+                if pat.search(line):
+                    return True, log
+            elif not getattr(link, "waits", False) or time.monotonic() > end:
+                return False, log           # a sim link has nothing more to say
+
+    def send(self, line):
+        self._console().write_line(line)
+
+    def read_until(self, regex, timeout_s):
+        pat, end, link = re.compile(regex), time.monotonic() + timeout_s, self._console()
+        while True:
+            while self.buf:
+                line = self.buf.pop(0)
+                if pat.search(line):
+                    return line
+            raw = link.readline(timeout_s)
+            if raw is not None:
+                self.buf.append(raw)
+            elif not getattr(link, "waits", False) or time.monotonic() > end:
+                return None
+
+    def selftest(self, test: str, args=(), timeout_s: float = 5.0) -> dict | None:
+        """One npie-selftest/1 exchange. The reply is the first `OK {json}`
+        whose "test" is this test, or an `ERR` (-> {"error": ...}); log lines
+        in between are skipped. None when nothing answered in time."""
+        self.send(" ".join(["st", test, *[str(a) for a in args]]))
+        end = time.monotonic() + timeout_s
+        while True:
+            line = self.read_until(r"^(OK|ERR)\b", max(end - time.monotonic(), 0.0))
+            if line is None:
+                return None
+            if line.startswith("ERR"):
+                return {"error": line[3:].strip()}
+            try:
+                obj = json.loads(line[2:].strip())
+            except json.JSONDecodeError:
+                continue
+            if isinstance(obj, dict) and obj.get("test") == test:
+                return obj
+
+    def off(self):
+        self._drop()
+
+
 LIVE = {"scpi-psu": ScpiPsu, "scpi-dmm": ScpiDmm, "scpi-scope": ScpiScope,
         "scpi-sdg": ScpiSdg, "sigrok": SigrokLogic, "serial": SerialConsole,
-        "fwe-pwm8": fwe_pwm8, "swd": SwdProbe}
+        "fwe-pwm8": fwe_pwm8, "swd": SwdProbe, "esp32": Esp32}
 SIM = {"psu": SimPsu, "dmm": SimDmm, "scope": SimScope, "logic": SimLogic,
-       "console": SimConsole, "probe": SimProbe, "pwm": _sim_pwm, "awg": _sim_awg}
+       "console": SimConsole, "probe": SimProbe, "pwm": _sim_pwm, "awg": _sim_awg,
+       "esp32": _sim_esp32}
 
 
 class _Named:
@@ -931,7 +1324,7 @@ class Bench:
             ok = True
         except Exception:       # the supply itself failed; the record says so
             ok = False
-        for name in ("pwm", "awg"):
+        for name in ("pwm", "awg", "esp32"):
             if name in self._open:
                 try:
                     self._open[name].off()
