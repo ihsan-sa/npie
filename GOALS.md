@@ -4,12 +4,10 @@ npie is a Claude Code skill that brings up and tests a circuit board. It writes 
 
 ## Standing goals
 
-Drafted by a dispatch run from the paragraph above, for the owner to keep, edit or replace.
-
 - **Limits from the design:** every pass/fail limit in a generated procedure traces to the board's design files.
-- **One driver layer:** every instrument, real or simulated, is driven through `npielib/instruments.py`.
+- **One driver layer:** every instrument, real or simulated, is driven through one instrument driver layer.
 - **Every run on record:** every run leaves a report PDF.
-- **Safe anywhere:** the whole skill runs on a simulated bench anywhere, and opens real instruments only on a marked bench host.
+- **Safe anywhere:** it runs on a simulated bench anywhere, and opens real instruments only on a marked bench host.
 
 ## Proposed goals
 
