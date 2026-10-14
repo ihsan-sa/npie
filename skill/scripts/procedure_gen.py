@@ -36,13 +36,15 @@ BENCH_EXAMPLE = {
     "console": '{driver: serial, port: /dev/ttyUSB0, baud: 115200}',
     "probe": '{driver: swd, tool: probe-rs}',
     "pwm": '{driver: fwe-pwm8, port: /dev/ttyUSB1, baud: 115200, f_rf_hz: 13560267.8}',
+    # found by the CH340's VID:PID on any host; serial: <usb serial> picks one of two boards
+    "esp32": '{driver: esp32, port: auto, vid_pid: "1a86:7523", baud: 115200}',
 }
 
 
 def bench_example(proc: dict) -> str:
     L = [f"# bench.yaml for {proc['board']}: copy to bench.yaml on the bench host and",
          "# fill in each resource. The box never uses this file.",
-         "bench: owner-laptop", "roles:"]
+         f"bench: {'bench-host' if 'esp32' in proc['roles'] else 'owner-laptop'}", "roles:"]
     L += [f"  {r}: {BENCH_EXAMPLE[r]}" for r in proc["roles"] if r in BENCH_EXAMPLE]
     return "\n".join(L) + "\n"
 

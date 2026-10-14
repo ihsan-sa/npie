@@ -18,6 +18,7 @@ written by you: when a limit looks wrong, fix the rule (or the board's
 | "write / update the bring-up procedure for <board>" | `scripts/procedure_gen.py --workspace <board>` -> `bringup/procedure.{json,md}` |
 | "what do I need to buy / have on the bench" | `scripts/shopping.py --workspace <board>` -> `bringup/shopping.md` |
 | "dry-run it", "check the procedure" | `scripts/npie_run.py start --workspace <board> --dry-run` (simulated bench; runs anywhere; `--fault short:<net>` to see a failure stop it, `--hold` to stop at human steps) |
+| "bring up the hi-fi board over USB" | the same `start`; a USB-first board (ESP32 + CH340 + CH224A) gets a procedure of two stages, USB then PD charger, measured by its own loopback (`reference/fwe-selftest.md` is the firmware's side). Any host with the board on USB can be its bench host |
 | "bring the board up", "run the tests" | on the bench host only (`NPIE_BENCH_HOST=1`): `npie_run.py start --workspace <board> --bench bringup/bench.yaml` |
 | a person answers a human step | `npie_run.py confirm --run <dir> --step <id> --by <name> [--value V] [--fail "why"]`, then `resume` |
 | "where is the run", "what is it waiting on" | `npie_run.py status --run <dir>` |
@@ -33,7 +34,11 @@ interactive.
 1. **The box never touches lab hardware.** No instrument, USB device, lab
    network host or tunnel is opened from the box; `--dry-run` is the only
    run the box does. Wiring any path from the box to the bench is on the
-   owner's approval list: ask, do not script it.
+   owner's approval list: ask, do not script it. The one exception the
+   owner set is a USB-first board plugged into the server: once the
+   server's owner has made it a bench host (`reference/bench-hosts.md`),
+   it runs that board live. npie never sets `NPIE_BENCH_HOST=1`, udev
+   rules or groups itself.
 2. **A human step is answered by a named person.** `--by` is recorded with
    the time. You may relay a confirmation the person gave you (Slack, the
    terminal); you never confirm one yourself, and a simulated run records
@@ -51,6 +56,7 @@ interactive.
 ## Firmware
 
 npie reads `firmware/fwe-manifest.json` (schema `fwe-manifest/1`, /fwe's
-contract) and nothing else of the firmware. No manifest: the programming
+contract) and nothing else of the firmware. A USB-first board also needs its
+`flash.esptool` and `selftest` sections (`reference/fwe-selftest.md`). No manifest: the programming
 and firmware-driven stages are listed as skipped, with the reason, and the
 rest of the procedure still runs.

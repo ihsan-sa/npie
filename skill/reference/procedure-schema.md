@@ -32,14 +32,18 @@ step with `expect`). Type-specific keys:
 
 | type | keys |
 |---|---|
-| `human` | `text`, `value` (optional: `{"unit": "V"}` when the person types a reading), `expect` when `value` is set, `provoke` (optional: `{"trip": "<manifest trip name>", "on": true\|false}` when the person starts or stops injecting on that trip's sense net; the sim bench latches the trip from it) |
+| `human` | `text`, `value` (optional: `{"unit": "V"}` when the person types a reading), `expect` when `value` is set, `provoke` (optional: `{"trip": "<manifest trip name>", "on": true\|false}` when the person starts or stops injecting on that trip's sense net; the sim bench latches the trip from it), `plug` (optional: `{"usb"\|"charger"\|"speakers": true\|false}`, what the person plugs in or out on a USB-first board; the sim board follows it) |
 | `supply` | `role`, `set: {v, i_limit, output}` |
 | `measure` | `role`, `quantity` (`voltage`, `current`, `resistance`, `diode`), `points: {"plus": ..., "minus": ...}`, `expect` |
 | `scope` | `role`, `channel`, `points`, `quantity` (`mean`, `vpp`, `freq`, `duty`, `deadtime`), `expect`, `screenshot`; `deadtime` (ns) is `channel`'s falling edge to `channel2`'s rising edge, and its `points` add `ch2` |
 | `logic` | `role`, `channels`, `samplerate`, `duration_s`, `expect: {"edges_min": n}` |
-| `flash` | `role` (`probe`), `artifact` (`elf`/`hex`/`bin`) |
-| `console` | `role`, `send` (or null to only read), `expect_re`, `timeout_s`, `fields` (JSON path -> expect) |
+| `flash` | `role` (`probe`, or `esp32` for esptool over the board's USB), `artifact` (`elf`/`hex`/`bin`) |
+| `console` | `role` (`console` or `esp32`), `send` (or null to only read), `expect_re`, `timeout_s`, `fields` (JSON path -> expect) |
 | `wait` | `seconds` |
+| `usb` | `role` (`esp32`), `vid_pid`: the USB serial bridge must enumerate on this host; the record's `value` is the port it found |
+| `boot` | `role` (`esp32`), `expect_re` (the banner), `timeout_s`: reset into the app over RTS/DTR and read the boot log until the banner; the record keeps the last 40 lines as `log` |
+| `selftest` | `role` (`esp32`), `test`, `args`, `timeout_s`, `fields` (reply field -> expect): one `st <test> <args>` exchange of `npie-selftest/1` (fwe-selftest.md); the record keeps the whole `reply` and the checked `fields`; an `ERR` reply or silence fails the step with a `note` |
+| `connect` | `role` (`esp32`), `transport` (`tcp`), `address_from` (the step whose `st net` reply gave `ip` and `port`): moves the console; the record's `applied` is replayed whenever a later invocation reopens the bench |
 | `pwm` | `role` (`pwm`), `set: {f_hz, duty, phase_deg, enable}`, each optional; `duty` (0..1) and `phase_deg` are one number for every channel or `{"<ch>": value}` for channels 0..7 |
 | `awg` | `role` (`awg`), `channel` (1 or 2), `set: {wave, f_hz, vpp, offset, duty, phase_deg, load, output}`, all optional (`wave` defaults to `SQUARE`); `load` is `50` or `"hiz"` |
 
@@ -51,6 +55,11 @@ board), all channels at the same period start, and the record's `applied`
 says what landed. An `awg` step reads every value back and aborts on a
 mismatch. A run that stops for any reason turns off the supply, then the
 outputs of any pwm or awg it opened.
+
+An `expect` may hold `any_of: [{nominal, min, max}, ...]` instead of one band
+(a 28 V EPR or 20 V fallback PD contract): the value passes inside any of them.
+A self-test step's limits are per field, so `bringup/overrides.yaml` names the
+field: `usb.06: {thdn_db: {max: -80}}`.
 
 `points` are `{"ref": "TP101", "pin": "1", "net": "/power_in/VM_IN", "label": "TP101 (VM_IN)"}`.
 

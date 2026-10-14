@@ -37,6 +37,22 @@ Every limit is derived from a design fact and says which one in the step's
   output-voltage trip by an open-loop duty aimed at OVP_OVERSHOOT x its
   threshold (below 97 % of the output net's rating), any other by a person
   injecting on its sense net through INJECT_R_OHM with an INJECT_ILIM_A limit.
+- USB-first audio board (ESP32-WROVER + CH340 on a USB-C, CH224A PD sink,
+  PCM1863/PCM1808 loopback ADC, TAS5825M/TPA3245 amp, all by netlist value):
+  the whole procedure is two stages and no bench supply. usb, on a host's
+  5 V only: the CH340 enumerates by VID:PID (manifest selftest.usb, else
+  1a86:7523), esptool flashes, the app boots to uart.banner_regex, `st rails`
+  reads VBUS 4.4-5.25 V (USB 2.0 at the device) and the 3.3 V rail +/-5 %,
+  and `st tone` plays TONE_HZ at TONE_DBFS (or the loopback block's
+  tone_hz/tone_dbfs) into each TAP_DAC_* net: frequency +/-0.5 %, level
+  dac_fs_vrms x 10^((dBFS + the tap's gain_db)/20) +/-1 dB, THD+N under the
+  block's thdn_db_max for the tap's kind. One USB-C for data and PD: `st net`
+  gives the Wi-Fi console's address (RSSI >= -75 dBm). pd, on the charger:
+  the contract (pd-sink contract_v, or fallback_v, +/-5 %), the amp's PVDD
+  rail at the same band, then with the speakers on, a tone into each
+  TAP_SPK_* (gain_db from the block; none -> skipped) and TAP_SUB_* net, and
+  a person confirms each output played it. A tap missing from the manifest's
+  selftest.taps is skipped with the reason.
 - limits: the under-voltage trip is checked while switching at D0 when the
   firmware has a `pwm` block (it latches input trips only while switching),
   else with the bridge idle.
@@ -47,7 +63,7 @@ import re
 from datetime import datetime, timezone
 
 from .design import Design, DesignError
-from .instruments import PWM8_ID
+from .instruments import CH340_VID_PID, PWM8_ID
 
 SCHEMA = "npie-procedure/1"
 
@@ -70,6 +86,17 @@ OVP_OVERSHOOT = 1.05
 INJECT_R_OHM = 100
 INJECT_ILIM_A = 0.02
 TRIP_SETTLE_S = 10.0        # a tripped, unloaded output bleeds down through its divider
+
+# USB-first audio boards: every one of these parts, by netlist value
+USB_FIRST_PARTS = {"mcu": r"ESP32-WROVER", "bridge": r"^CH340", "pd": r"^CH224",
+                   "adc": r"PCM1863|PCM1808", "amp": r"TAS5825M|TPA3245"}
+TAP_RE = re.compile(r"^TAP_(DAC|SUB|SPK)(?:_\w+)?$", re.I)
+SELFTEST_CONTRACT = "npie-selftest/1"
+TONE_HZ, TONE_DBFS = 1000.0, -20.0
+LEVEL_TOL_DB = 1.0
+FREQ_TOL = 0.005
+USB_VBUS_V = (4.4, 5.25)    # USB 2.0 at the device, after cable drop
+RSSI_MIN_DBM = -75
 
 EVN_HEADER_RE = re.compile(r"\bEVN JP8\b")
 EVN_V_PINS, EVN_GND_PINS = ("1", "17"), ("6", "9")   # JP8, Raspberry Pi numbering
@@ -212,6 +239,196 @@ class _Builder:
             return None
         b = self.bridges[0]
         return {"out": b["bus"], "sw": b["phase"], "ic": b.get("ic") or b["hs"]}
+
+    # ---- USB-first audio boards (ESP32 + CH340 on the USB-C, CH224A PD sink)
+
+    def _part(self, pattern: str) -> str | None:
+        return next((r for r in self.d.refs("U") if re.search(pattern, self.d.value(r), re.I)),
+                    None)
+
+    def _connector_of(self, ref: str | None) -> str | None:
+        """The J sharing a signal net (not ground, not VBUS) with `ref`."""
+        if not ref:
+            return None
+        for p in self.d.pins_of(ref):
+            if re.search(r"GND|VBUS", p["net"], re.I):
+                continue
+            j = next((n["ref"] for n in self.d.nets.get(p["net"], [])
+                      if re.match(r"^J\d+$", n["ref"] or "")), None)
+            if j:
+                return j
+        return None
+
+    def _usb_first(self) -> dict | None:
+        """The USB-first design facts, or None when this is not such a board."""
+        d = self.d
+        parts = {k: self._part(p) for k, p in USB_FIRST_PARTS.items()}
+        if not all(parts.values()):
+            return None
+        usb_j, pd_j = self._connector_of(parts["bridge"]), self._connector_of(parts["pd"])
+        if not usb_j:
+            return None
+        loop = next((b for b in d.blocks if b.get("kind") == "loopback"), {})
+        pd = next((b for b in d.blocks if b.get("kind") == "pd-sink"), {})
+        taps = []
+        for net in d.nets:
+            m = TAP_RE.match(_short(net))
+            if not m:
+                continue
+            kind = m.group(1).lower()
+            cfg = (loop.get("taps") or {}).get(_short(net), {})
+            gain = cfg.get("gain_db", 0.0 if kind in ("dac", "sub") else None)
+            thdn = (loop.get("thdn_db_max") or {}).get(kind)
+            taps.append({"name": _short(net)[4:].lower(), "net": net, "kind": kind,
+                         "gain_db": gain, "thdn_db_max": thdn, "needs_amp": kind == "spk"})
+        kinds = {"dac": 0, "sub": 1, "spk": 2}
+        taps.sort(key=lambda t: (kinds[t["kind"]], t["name"]))
+        amp_rail = next((p["net"] for p in d.pins_of(parts["amp"])
+                         if re.search(r"PVDD|PVCC", p["func"], re.I)), None)
+        v3 = next((n for n in d.voltages if re.search(r"3V3|3\.3V", n, re.I)), None)
+        return {"parts": {k: f"{r} {d.value(r)}" for k, r in parts.items()},
+                "usb_connector": usb_j, "pd_connector": pd_j, "single_port": usb_j == pd_j,
+                "vid_pid": ((d.manifest or {}).get("selftest") or {}).get("usb", {}).get(
+                    "vid_pid", CH340_VID_PID),
+                "rail_3v3": v3, "amp_rail": amp_rail, "taps": taps,
+                "tone": {"freq_hz": float(loop.get("tone_hz", TONE_HZ)),
+                         "level_dbfs": float(loop.get("tone_dbfs", TONE_DBFS))},
+                "dac_fs_vrms": loop.get("dac_fs_vrms"),
+                "pd": {"contract_v": pd.get("contract_v"), "fallback_v": pd.get("fallback_v")}}
+
+    def _tone_steps(self, taps: list[dict]):
+        uf, st = self.uf, self.d.manifest.get("selftest") or {}
+        f, dbfs = uf["tone"]["freq_hz"], uf["tone"]["level_dbfs"]
+        for t in taps:
+            if t["name"] not in (st.get("taps") or {}):
+                self.skip(f"tone:{t['name']}", f"tap {t['net']} is not in the manifest's "
+                                               "selftest.taps")
+                continue
+            if t["gain_db"] is None or t["thdn_db_max"] is None or uf["dac_fs_vrms"] is None:
+                self.skip(f"tone:{t['name']}", f"no level or THD+N limit for {t['net']} in "
+                                               "the constraints loopback block")
+                continue
+            v = uf["dac_fs_vrms"] * 10 ** ((dbfs + t["gain_db"]) / 20)
+            lo, hi = 10 ** (-LEVEL_TOL_DB / 20), 10 ** (LEVEL_TOL_DB / 20)
+            self.step("selftest", role="esp32", test="tone", args=[t["name"], f"{f:g}", f"{dbfs:g}"],
+                      timeout_s=5, text=f"{f:g} Hz at {dbfs:g} dBFS read back on {_short(t['net'])}",
+                      fields={
+                          "freq_hz": {"nominal": f, "min": round(f * (1 - FREQ_TOL), 3),
+                                      "max": round(f * (1 + FREQ_TOL), 3), "unit": "Hz"},
+                          "vrms": {"nominal": round(v, 5), "min": round(v * lo, 5),
+                                   "max": round(v * hi, 5), "unit": "Vrms"},
+                          "thdn_db": {"nominal": None, "min": None, "max": t["thdn_db_max"],
+                                      "unit": "dB"}},
+                      derived_from=f"constraints loopback: dac_fs_vrms {uf['dac_fs_vrms']:g} Vrms, "
+                                   f"{_short(t['net'])} gain {t['gain_db']:g} dB, +/-{LEVEL_TOL_DB:g} dB; "
+                                   f"f +/-{FREQ_TOL * 100:g} %; THD+N <= {t['thdn_db_max']:g} dB "
+                                   f"({t['kind']})")
+
+    def _contract_band(self) -> dict | None:
+        pd = self.uf["pd"]
+        bands = [{"nominal": float(v), "min": round(v * (1 - TOL_REG), 3),
+                  "max": round(v * (1 + TOL_REG), 3)}
+                 for v in (pd.get("contract_v"), pd.get("fallback_v")) if v]
+        if not bands:
+            return None
+        return ({**bands[0], "unit": "V"} if len(bands) == 1
+                else {"any_of": bands, "nominal": None, "min": None, "max": None, "unit": "V"})
+
+    def usb_bringup(self):
+        """Stage A: the board on its own USB-C from a host's 5 V, nothing else."""
+        uf, m = self.uf, self.d.manifest
+        self.stage("usb", "On USB only: flash, boot and loopback self-test")
+        self.skip("visual, unpowered", "a USB-first board is plugged straight into a host; "
+                                       "its port's current limit stands in for the bench supply")
+        self.human(f"Plug the board's USB-C ({uf['usb_connector']}) into this host with a USB data "
+                   "cable (not charge-only). Nothing else on the board: no charger, no speakers. "
+                   "It powers up from the host's 5 V now.", plug={"usb": True})
+        self.step("usb", role="esp32", vid_pid=uf["vid_pid"],
+                  text=f"{uf['parts']['bridge']} enumerates as {uf['vid_pid']}",
+                  derived_from=f"netlist {uf['parts']['bridge']} on {uf['usb_connector']}")
+        if not m or not ((m.get("flash") or {}).get("esptool")):
+            self.skip("usb:flash", "no firmware/fwe-manifest.json with flash.esptool")
+            return False
+        self.step("flash", role="esp32", artifact="bin", text="esptool over the board's USB",
+                  derived_from=f"manifest flash.esptool, firmware {m.get('version', '?')}")
+        self.step("boot", role="esp32", expect_re=(m.get("uart") or {}).get("banner_regex", "."),
+                  timeout_s=10, text="reset into the app, boot log to the banner",
+                  derived_from="manifest uart.banner_regex")
+        st = m.get("selftest") or {}
+        if st.get("contract") != SELFTEST_CONTRACT:
+            self.skip("usb:self-test", f"manifest has no selftest section ({SELFTEST_CONTRACT})")
+            return False
+        fields = {"vbus_v": {"nominal": 5.0, "min": USB_VBUS_V[0], "max": USB_VBUS_V[1],
+                             "unit": "V"}}
+        if uf["rail_3v3"]:
+            v = self.d.voltages[uf["rail_3v3"]]
+            fields["v3v3_v"] = {"nominal": v, "min": round(v * (1 - TOL_REG), 3),
+                                "max": round(v * (1 + TOL_REG), 3), "unit": "V"}
+        self.step("selftest", role="esp32", test="rails", timeout_s=3, fields=fields,
+                  text="rails on USB power",
+                  derived_from=f"USB VBUS {USB_VBUS_V[0]:g}-{USB_VBUS_V[1]:g} V; constraints "
+                               f"voltages[{uf['rail_3v3']}] +/-{TOL_REG * 100:g} %")
+        self._tone_steps([t for t in uf["taps"] if t["kind"] == "dac"])
+        if uf["single_port"]:
+            self.step("selftest", role="esp32", test="net", timeout_s=20,
+                      text="on Wi-Fi: the console's TCP address",
+                      fields={"port": {"nominal": None, "min": 1, "max": 65535, "unit": ""},
+                              "rssi_dbm": {"nominal": None, "min": RSSI_MIN_DBM, "max": 0,
+                                           "unit": "dBm"}},
+                      derived_from=f"one USB-C ({uf['usb_connector']}) for data and PD: the "
+                                   f"charger replaces the host, so the console moves to TCP; "
+                                   f"RSSI >= {RSSI_MIN_DBM} dBm")
+        return True
+
+    def pd_stage(self):
+        """Stage B: the PD charger, then the speakers."""
+        uf = self.uf
+        self.stage("pd", "On the PD charger: contract, amp rail, speaker and sub outputs")
+        pd, band = uf["pd"], self._contract_band()
+        want = " or ".join(f"{v:g} V" for v in (pd.get("contract_v"), pd.get("fallback_v")) if v)
+        epr = any(v and v > 20 for v in (pd.get("contract_v"), pd.get("fallback_v")))
+        charger = f"a USB-C PD charger{' with EPR (28 V)' if epr else ''}" + (
+            f" that offers {want}" if want else "")
+        if uf["single_port"]:
+            net = next(s for s in self._stage_steps("usb") if s.get("test") == "net")
+            self.human(f"Unplug the USB cable from the host and plug {charger} into the same "
+                       f"USB-C ({uf['usb_connector']}). The board restarts on the charger and "
+                       "the console carries on over Wi-Fi.",
+                       plug={"usb": False, "charger": True})
+            self.step("connect", role="esp32", transport="tcp", address_from=net["id"],
+                      text="console over Wi-Fi (TCP)", derived_from=f"the address {net['id']} reported")
+        else:
+            self.human(f"Plug {charger} into {uf['pd_connector'] or 'the PD input'}; the USB "
+                       "cable stays in.", plug={"charger": True})
+        if band:
+            self.step("selftest", role="esp32", test="pd", timeout_s=5,
+                      fields={"contract_v": band}, text=f"PD contract {want}",
+                      derived_from="constraints pd-sink contract_v"
+                                   + (" or fallback_v" if pd.get("fallback_v") else "")
+                                   + f" +/-{TOL_REG * 100:g} %")
+        else:
+            self.skip("pd:contract", "no constraints block of kind pd-sink with contract_v")
+        if band and uf["amp_rail"]:
+            self.step("selftest", role="esp32", test="rails", timeout_s=3,
+                      fields={"vamp_v": band}, text=f"amp rail {_short(uf['amp_rail'])}",
+                      derived_from=f"netlist {uf['parts']['amp']} PVDD on {uf['amp_rail']}: "
+                                   "the negotiated contract")
+        spk = [t for t in uf["taps"] if t["kind"] == "spk"]
+        sub = [t for t in uf["taps"] if t["kind"] == "sub"]
+        if not spk:
+            self.skip("pd:speakers", "no TAP_SPK_* nets reach the loopback ADC: the speaker "
+                                     "outputs need a bench meter, not generated yet")
+        self.human("Connect the speakers to the speaker outputs and the sub to the sub out. The "
+                   f"next steps play a {uf['tone']['freq_hz']:g} Hz tone at "
+                   f"{uf['tone']['level_dbfs']:g} dBFS through each output in turn.",
+                   plug={"speakers": True})
+        self._tone_steps(spk + sub)
+        self.human("Each speaker and the sub played the tone in turn, cleanly, with no buzz "
+                   "or hum between tones.")
+
+    def _stage_steps(self, sid: str) -> list[dict]:
+        return next(st["steps"] for st in self.stages if st["id"] == sid)
+
 
     # ---- stages
 
@@ -770,6 +987,13 @@ class _Builder:
 def generate(d: Design, now: datetime | None = None) -> dict:
     b = _Builder(d)
     b.analyse()
+    b.uf = b._usb_first()
+    if b.uf:
+        if b.usb_bringup():
+            b.pd_stage()
+        else:
+            b.skip("pd", "needs the usb stage's flash and self-test first")
+        return _finish(d, b, now)
     b.visual()
     b.unpowered()
     b.host_link()
@@ -780,6 +1004,10 @@ def generate(d: Design, now: datetime | None = None) -> dict:
     b.power_stage()
     b.full_function()
     b.limits()
+    return _finish(d, b, now)
+
+
+def _finish(d: Design, b: _Builder, now: datetime | None) -> dict:
     stages = [s for s in b.stages if s["steps"]]
     applied = _apply_overrides(stages, d.overrides)
     return {
@@ -791,6 +1019,7 @@ def generate(d: Design, now: datetime | None = None) -> dict:
                    "rails": [r["net"] for r in b.rails],
                    "half_bridges": b.bridges,
                    "boost": b.boost,
+                   "usb_first": b.uf,
                    "vin_range": list(d.vin_range) if d.vin_range else None},
         "roles": sorted(b.roles),
         "skipped": b.skipped,
@@ -814,6 +1043,15 @@ def _apply_overrides(stages: list[dict], overrides: dict) -> list[dict]:
     applied = []
     for sid, fields in sorted(overrides.items()):
         s = by_id[sid]
+        if "expect" not in s and s.get("fields") and all(
+                k in s["fields"] and isinstance(v, dict) for k, v in fields.items()):
+            # a self-test step: its limits are per reply field
+            applied.append({"step": sid, "generated": {k: dict(s["fields"][k]) for k in fields},
+                            "override": {k: dict(v) for k, v in fields.items()}})
+            for k, v in fields.items():
+                s["fields"][k].update(v)
+            s["derived_from"] = s.get("derived_from", "") + " (overridden in bringup/overrides.yaml)"
+            continue
         if "expect" not in s:
             raise DesignError(f"bringup/overrides.yaml: step {sid} has no limits to override")
         applied.append({"step": sid, "generated": dict(s["expect"]), "override": dict(fields)})

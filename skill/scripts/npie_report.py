@@ -56,6 +56,8 @@ def limits(e: dict | None) -> str:
         return ""
     if "edges_min" in e:
         return f">= {e['edges_min']} edges"
+    if e.get("any_of"):
+        return " or ".join(limits({**x, "unit": e.get("unit")}) for x in e["any_of"])
     u = e.get("unit") or ""
     lo, hi = e.get("min"), e.get("max")
     if lo is not None and hi is not None:
@@ -143,8 +145,9 @@ def build_tex(rdir: Path, run: dict, proc: dict) -> str:
         elif r.get("fields"):
             val = ", ".join(f"{k}={num(v)}" for k, v in r["fields"].items())
         what = st.get("text") or (st.get("send") and "reply to " + st["send"])
-        rows.append([sid(i), esc(what or st.get("quantity") or st["type"]),
-                     limits(st.get("expect")), num(val) + " " + esc(r.get("unit") or ""),
+        lim = limits(st.get("expect")) or "; ".join(
+            f"{esc(k)} {limits(e)}" for k, e in (st.get("fields") or {}).items())
+        rows.append([sid(i), esc(what or st.get("quantity") or st["type"]), lim, num(val) + " " + esc(r.get("unit") or ""),
                      esc(r.get("verdict", "not run"))])
     B += [r"\section{Measurements}",
           table(r"p{0.17\linewidth}p{0.31\linewidth}p{0.18\linewidth}p{0.14\linewidth}l",

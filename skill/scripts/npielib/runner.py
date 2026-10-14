@@ -52,6 +52,8 @@ def stale_inputs(proc: dict, ws: Path) -> list[str]:
 def within(value, e: dict) -> bool:
     if value is None:
         return False
+    if e.get("any_of"):          # one of several bands, e.g. a 28 V EPR or 20 V PD contract
+        return any(within(value, x) for x in e["any_of"])
     lo, hi = e.get("min"), e.get("max")
     return (lo is None or value >= lo) and (hi is None or value <= hi)
 
@@ -113,6 +115,11 @@ class Run:
         else:
             cfg = bench_cfg if bench_cfg is not None else self.rec["bench_config"]
             self.bench = instruments.Bench(cfg)
+        # a console moved to TCP stays there across invocations, like the board
+        moved = [r for r in self.rec["steps"] if r["type"] == "connect" and r["verdict"] == "pass"]
+        if moved:
+            a = moved[-1]["applied"]
+            self.bench.role(moved[-1]["role"]).connect(a["transport"], a.get("host"), a.get("port"))
         return self.bench
 
     def keep_sim(self):
@@ -125,6 +132,11 @@ class Run:
 
     def safe_off(self, why: str):
         ok = self.bench.safe_off() if self.bench is not None else False
+        if "psu" not in self.proc.get("roles", []):
+            # a USB-first board runs from the host's 5 V or its PD charger
+            self.rec["safe_state"] = (f"no bench supply in this procedure: the board stays on "
+                                      f"its USB or charger power until it is unplugged ({why})")
+            return
         self.rec["safe_state"] = (f"supply outputs off at {now()} ({why})" if ok
                                   else f"no supply reachable to turn off ({why})")
 
@@ -157,8 +169,14 @@ def create(ws: Path, *, bench: str, bench_cfg: dict | None, label: str | None,
         net = arg.rsplit("=", 1)[0] if kind == "rail" else arg
         if f in ("no-banner", "no-flash") or (kind in ("short", "rail") and net in probed):
             continue
+        uf = (proc.get("design") or {}).get("usb_first")
+        if uf and (f == "no-usb" or (kind == "tap" and arg in {t["name"] for t in uf["taps"]})
+                   or (kind == "pd" and _is_number(arg))):
+            continue
         raise RunError(f"--fault {f!r}: not a known fault, or names a net no step probes "
-                       f"(probed: {', '.join(sorted(probed))})")
+                       f"(probed: {', '.join(sorted(probed))})"
+                       + (f"; this USB-first board also takes no-usb, pd:<volts> and tap:<name> "
+                          f"({', '.join(t['name'] for t in uf['taps'])})" if uf else ""))
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     base = ws / "bringup" / "runs" / f"{stamp}-{label or bench}"
     rdir, n = base, 1
@@ -201,6 +219,21 @@ def _check_fields(line: str, fields: dict) -> tuple[bool, dict]:
     return ok, got
 
 
+def _is_number(x: str) -> bool:
+    try:
+        float(x)
+        return True
+    except ValueError:
+        return False
+
+
+def _reply_of(run: Run, sid: str) -> dict:
+    r = next((x for x in run.rec["steps"] if x["id"] == sid), None)
+    if not r or not isinstance(r.get("reply"), dict):
+        raise RunError(f"step {sid} left no self-test reply to read an address from")
+    return r["reply"]
+
+
 def execute(run: Run, s: dict) -> dict:
     """One non-human step -> its record (verdict pass/fail)."""
     t, b = s["type"], run.bench
@@ -238,12 +271,12 @@ def execute(run: Run, s: dict) -> dict:
         man = _manifest(run.ws)
         if man is None:
             raise RunError("flash step but no firmware/fwe-manifest.json")
-        ok, log = b.role("probe").flash(man, run.ws)
+        ok, log = b.role(s.get("role", "probe")).flash(man, run.ws)
         return run.record(s, verdict="pass" if ok else "fail", log=log,
                           artifact_sha256=((man.get("artifact") or {}).get("sha256") or {})
                           .get(s.get("artifact", "elf")))
     if t == "console":
-        con = b.role("console")
+        con = b.role(s.get("role", "console"))
         if s.get("send"):
             con.send(s["send"])
         line = con.read_until(s["expect_re"], float(s.get("timeout_s", 2)))
@@ -262,6 +295,34 @@ def execute(run: Run, s: dict) -> dict:
     if t == "awg":
         applied = b.role("awg").set(channel=s.get("channel", 1), **s["set"])
         return run.record(s, verdict="pass", set=s["set"], applied=applied)
+    if t == "usb":
+        # the bridge not enumerating is the board failing, not the bench
+        try:
+            got = b.role(s["role"]).enumerate()
+        except instruments.BenchError as exc:
+            return run.record(s, verdict="fail", note=str(exc))
+        return run.record(s, verdict="pass", value=got["port"], vid_pid=got["vid_pid"])
+    if t == "boot":
+        ok, log = b.role(s["role"]).boot(s["expect_re"], float(s.get("timeout_s", 10)))
+        return run.record(s, verdict="pass" if ok else "fail",
+                          value=log[-1] if ok and log else None, log="\n".join(log[-40:]))
+    if t == "selftest":
+        reply = b.role(s["role"]).selftest(s["test"], s.get("args", []),
+                                           float(s.get("timeout_s", 5)))
+        got = {k: (reply or {}).get(k) for k in s.get("fields", {})}
+        ok = bool(reply) and "error" not in reply and all(
+            isinstance(v, (int, float)) and not isinstance(v, bool) and within(float(v), s["fields"][k])
+            for k, v in got.items())
+        r = run.record(s, verdict="pass" if ok else "fail", reply=reply, fields=got)
+        if reply is None:
+            r["note"] = "no reply"
+        elif "error" in reply:
+            r["note"] = reply["error"]
+        return r
+    if t == "connect":
+        rep = _reply_of(run, s["address_from"])
+        applied = b.role(s["role"]).connect(s["transport"], rep.get("ip"), rep.get("port"))
+        return run.record(s, verdict="pass", role=s["role"], applied=applied)
     raise RunError(f"step {s['id']}: unknown type {t!r}")
 
 

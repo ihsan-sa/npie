@@ -1,0 +1,56 @@
+{
+ "voltages": [
+  {
+   "net": "VBUS",
+   "voltage": 28
+  },
+  {
+   "net": "GND",
+   "voltage": 0
+  },
+  {
+   "net": "+3V3",
+   "voltage": 3.3
+  },
+  {
+   "net": "/power/VAMP",
+   "voltage": 28
+  }
+ ],
+ "power": [
+  {
+   "net": "+3V3",
+   "current_a": 0.35
+  }
+ ],
+ "blocks": [
+  {
+   "name": "pd",
+   "kind": "pd-sink",
+   "part": "U3",
+   "contract_v": 28,
+   "fallback_v": 20
+  },
+  {
+   "name": "loopback",
+   "kind": "loopback",
+   "adc": "U4",
+   "tone_hz": 1000,
+   "tone_dbfs": -20,
+   "dac_fs_vrms": 2.1,
+   "taps": {
+    "TAP_SPK_L": {
+     "gain_db": 12.0
+    },
+    "TAP_SPK_R": {
+     "gain_db": 12.0
+    }
+   },
+   "thdn_db_max": {
+    "dac": -85,
+    "sub": -80,
+    "spk": -65
+   }
+  }
+ ]
+}

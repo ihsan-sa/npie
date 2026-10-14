@@ -1,0 +1,20 @@
+Designator,Comment,Footprint,LCSC Part #
+J1,"USB-C 16p receptacle",X,C0
+J2,"Speaker L terminal",X,C0
+J3,"Speaker R terminal",X,C0
+J4,"Sub out RCA",X,C0
+U1,"ESP32-WROVER-E",X,C0
+U2,"CH340C",X,C0
+U3,"CH224A",X,C0
+U4,"PCM1863",X,C0
+U5,"TAS5825M",X,C0
+U6,"PCM5102A",X,C0
+U7,"OPA1612",X,C0
+U8,"TLV75733",X,C0
+Q1,"AON7423 load switch",X,C0
+R1,"47k",X,C0
+R2,"4k7",X,C0
+R3,"47k",X,C0
+R4,"4k7",X,C0
+C1,"10uF",X,C0
+C2,"10uF",X,C0
