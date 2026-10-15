@@ -208,7 +208,8 @@ def test_live_bench_needs_the_bench_host_flag(tmp_path):
         rc, out = _run("resume", "--run", run, env=host)
     assert rc == 2 and out["status"] == "aborted" and "role 'dmm'" in out["error"]
     assert out["cursor"] == "unpowered.03"
-    assert out["safe_state"].startswith("no supply reachable")
+    assert out["safe_state"].startswith("supply not confirmed off")
+    assert "role 'psu'" in out["safe_state"]
 
 
 def test_fault_flags_need_dry_run(tmp_path):

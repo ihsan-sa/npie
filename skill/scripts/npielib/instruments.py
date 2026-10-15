@@ -585,15 +585,36 @@ def _visa(resource: str):
         raise BenchError(f"cannot open {resource}: {exc}") from exc
 
 
+PSU_READBACK_V = 0.01   # a supply's setting resolution, at worst; well inside any rail tolerance
+PSU_READBACK_A = 0.01
+
+
 class ScpiPsu:
-    def __init__(self, cfg):
-        self.i, self.ch = _visa(cfg["resource"]), int(cfg.get("channel", 1))
+    """A SCPI supply. Every write is read back: a setpoint the supply clamped
+    or ignored (a front-panel limit, local mode, the wrong channel) is refused
+    before the output goes on, and off() raises unless OUTP? reads off, so a
+    run's record says the supply is off only when the supply says so."""
+
+    def __init__(self, cfg, inst=None):
+        self.i = inst if inst is not None else _visa(cfg["resource"])
+        self.ch = int(cfg.get("channel", 1))
+
+    def _on(self) -> bool:
+        return self.i.query("OUTP?").strip().upper() in ("1", "ON")
 
     def set(self, v, i_limit, output):
         self.i.write(f"INST:NSEL {self.ch}")
         self.i.write(f"VOLT {float(v):.3f}")
         self.i.write(f"CURR {float(i_limit):.3f}")
+        for q, want, tol in (("VOLT?", float(v), PSU_READBACK_V),
+                             ("CURR?", float(i_limit), PSU_READBACK_A)):
+            got = float(self.i.query(q))
+            if abs(got - want) > tol:
+                raise BenchError(f"psu: channel {self.ch} {q} reads back {got:g}, set {want:g}")
         self.i.write(f"OUTP {'ON' if output else 'OFF'}")
+        if self._on() != bool(output):
+            raise BenchError(f"psu: channel {self.ch} output reads back "
+                             f"{'on' if not output else 'off'}, set {'on' if output else 'off'}")
 
     def measure(self, quantity):
         self.i.write(f"INST:NSEL {self.ch}")
@@ -602,6 +623,8 @@ class ScpiPsu:
     def off(self):
         self.i.write(f"INST:NSEL {self.ch}")
         self.i.write("OUTP OFF")
+        if self._on():
+            raise BenchError(f"psu: channel {self.ch} output still reads on after OUTP OFF")
 
 
 class ScpiDmm:
@@ -937,18 +960,19 @@ class Bench:
                 self._open[name] = _Named(name, rc["driver"], drv(rc))
         return self._open[name]
 
-    def safe_off(self) -> bool:
+    def safe_off(self) -> str | None:
         """Supply outputs off, then the outputs of any drive source this run
-        opened (pwm, awg); True when a supply was reachable."""
+        opened (pwm, awg); None when the supply took the off, else why it may
+        still be on (unreachable, or its output still reads on)."""
         try:
             self.role("psu").off()
-            ok = True
-        except Exception:       # the supply itself failed; the record says so
-            ok = False
+            err = None
+        except Exception as exc:    # the supply itself failed; the record says so
+            err = str(exc)
         for name in ("pwm", "awg"):
             if name in self._open:
                 try:
                     self._open[name].off()
                 except Exception:   # a dead link: the supply is what made it safe
                     pass
-        return ok
+        return err

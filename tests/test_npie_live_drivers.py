@@ -50,21 +50,59 @@ VARIANTS = [_mini_bldc, _no_manifest, _evn_header, _spin, _boost, _rf, _hall]
 IDS = ["mini-bldc", "no-manifest", "evn-header", "spin", "boost", "rf-drive", "hall"]
 
 
-class _Visa:
-    """A VISA resource: numbers for the generic SCPI queries, and an SdgModel
-    behind the SDG's own commands so ScpiSdg's read-back holds."""
+class PsuModel:
+    """A SCPI supply's settings as it answers them: VOLT, CURR and OUTP per
+    channel, read back by VOLT?, CURR? and OUTP? (1 or 0). `clamp_v` is a
+    voltage it won't go above (a front-panel limit), and `stuck_on` an output
+    that won't turn off."""
 
-    def __init__(self):
-        self.sdg = instruments.SdgModel()
+    def __init__(self, clamp_v: float | None = None, stuck_on: bool = False):
+        self.clamp_v, self.stuck_on = clamp_v, stuck_on
+        self.ch, self.set = 1, {}
+
+    def _now(self) -> dict:
+        return self.set.setdefault(self.ch, {"VOLT": 0.0, "CURR": 0.0, "OUTP": False})
+
+    def write(self, cmd) -> bool:
+        k, _, arg = cmd.partition(" ")
+        if k == "INST:NSEL":
+            self.ch = int(arg)
+        elif k in ("VOLT", "CURR"):
+            v = float(arg)
+            self._now()[k] = min(v, self.clamp_v) if k == "VOLT" and self.clamp_v is not None else v
+        elif k == "OUTP":
+            self._now()["OUTP"] = arg == "ON" or self.stuck_on
+        else:
+            return False
+        return True
+
+    def query(self, cmd) -> str | None:
+        k = cmd.rstrip("?")
+        if cmd.endswith("?") and k in ("VOLT", "CURR", "OUTP"):
+            v = self._now()[k]
+            return str(int(v)) if k == "OUTP" else f"{v:.3f}"
+        return None
+
+
+class _Visa:
+    """A VISA resource: a PsuModel behind the supply's settings, an SdgModel
+    behind the SDG's own commands so both drivers' read-back holds, and
+    numbers for the other SCPI queries."""
+
+    def __init__(self, psu: PsuModel | None = None):
+        self.sdg, self.psu = instruments.SdgModel(), psu or PsuModel()
 
     def write(self, cmd):
         if re.match(r"C[12]:|MODE ", cmd):
             self.sdg.write(cmd)
+        else:
+            self.psu.write(cmd)
 
     def query(self, cmd):
         if cmd == "*IDN?" or re.match(r"C[12]:", cmd):
             return self.sdg.query(cmd)
-        return "1.0"
+        got = self.psu.query(cmd)
+        return "1.0" if got is None else got
 
     def read_raw(self):
         return b"#9000000008" + b"\x89PNG\r\n\x1a\n"

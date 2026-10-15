@@ -197,7 +197,10 @@ Safety in the runner, independent of the procedure: whenever a run ends
 off, then any pwm or awg outputs the run drove, before it stops, and records
 that in `safe_state`. A passed run is no exception: a procedure need not end
 with the supply off (a board with no operating range skips the limits stage
-that does), and nobody may be at the bench to do it. A live bench (`--bench`) is refused unless the host
+that does), and nobody may be at the bench to do it. `safe_state` says
+"supply outputs off" only when the supply reads its output back off; one
+that can't be reached, or still reads on, gives "supply not confirmed off"
+and why. A live bench (`--bench`) is refused unless the host
 sets `NPIE_BENCH_HOST=1`; only the bench host does (bench-hosts.md), so the
 box cannot open an instrument by accident. The drivers check it too, at each
 door to hardware (VISA, serial, sigrok-cli, the flash tool), so a driver built
@@ -235,7 +238,10 @@ Drivers (`scripts/npielib/instruments.py`), each a small class per role:
 - **scpi-*** over pyvisa. A generic SCPI set per role (`MEAS:VOLT:DC?`,
   `APPL`, `OUTP`, `:MEAS:VPP?`, `:DISP:DATA?`) with a per-model table for
   the commands that differ (Rigol, Siglent, Keysight). pyvisa-py is the
-  backend, so no vendor VISA install is needed.
+  backend, so no vendor VISA install is needed. scpi-psu reads back
+  `VOLT?` and `CURR?` before it turns the output on, refusing a setpoint the
+  supply didn't take (a front-panel limit, local mode), and `OUTP?` after
+  every on or off.
 - **sigrok** through `sigrok-cli` (capture to a file, decode with its
   protocol decoders), not the Python bindings, which are not packaged.
 - **serial** through pyserial, speaking the manifest's line protocol
