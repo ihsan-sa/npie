@@ -21,6 +21,14 @@ Filed by runs. Each says what done looks like as something a run can check, and 
 - **Blocked:** the widening has to land on #19's branch (`track/esp32-usb-bringup`), and a dispatch run can't push there or merge it into its own branch (`git merge` is refused). Someone with push access makes the change on that branch, or lets runs run `git merge`. See `.dispatch/notes/21.md`.
 - **Done when:** #19 is merged into main; on main, the amp matcher in `skill/scripts/npielib/procgen.py` accepts TAS5825M, TAS5825P, TAS5828M, TPA3245 and TPA3255; a test in `tests/test_npie_usb_first.py` generates the USB-first plan for a board whose amp is one of the three new parts; and `make check` passes on main.
 
+### Every limit names its design input
+
+- **Serves:** Limits from the design
+- **Done when:** `make check` passes with `tests/test_npie_limit_trace.py` generating, from fixture boards only (no boards repo), every stage procgen emits, `power-stage` for a boost included, and finding no step with `expect` or `fields` whose `derived_from` does not point into a design input (a field of the netlist, constraints, BOM, requirements or manifest, such as `manifest commands[duty]` or `constraints voltages[+3V3]`), and the test's `RULE_ONLY` list of limits that are procgen constants (today the short-check floors and the spin current) is empty.
+- **Status:** open
+- **Pull requests:** [#28](https://github.com/ihsan-sa/npie/pull/28) (the check on the mini-bldc fixture and its variants; seven untraced `derived_from` wordings fixed, plus five on paths no fixture reaches yet); [#30](https://github.com/ihsan-sa/npie/pull/30) (a boost variant of mini-bldc, so the check covers every `power-stage` step and both kinds of trip, all already traced); the PR from `dispatch/31` (the short-check floors and the spin current come from a `bringup` block in constraints.json, the fixture carries one, and `RULE_ONLY` is gone, so any `procgen default` fails the check). A board whose constraints have no `bringup` block still gets the old defaults, and its steps say `procgen default`.
+- **Waiting on:** the check above passes with the `dispatch/31` PR, but the goal stays open until the owner accepts `constraints bringup{}` as where these limits live (or names another place) and confirms hwde keeps the key when it regenerates constraints.json. See `.dispatch/notes/31.md`.
+
 ## Later
 
 Goals waiting for an open slot. When a proposed goal closes, the run that closed it moves the top one here up into Proposed goals as open.
@@ -46,10 +54,3 @@ What has landed, from the git history (a line per PR).
 - [#26](https://github.com/ihsan-sa/npie/pull/26) Draft standing goals in GOALS.md for the owner to approve
 - [#28](https://github.com/ihsan-sa/npie/pull/28) Check every generated limit names its design input
 - [#30](https://github.com/ihsan-sa/npie/pull/30) Record the boost trace step in GOALS.md and run notes
-
-### Every limit names its design input
-
-- **Serves:** Limits from the design
-- **Done when:** `make check` passes with `tests/test_npie_limit_trace.py` generating, from fixture boards only (no boards repo), every stage procgen emits, `power-stage` for a boost included, and finding no step with `expect` or `fields` whose `derived_from` does not point into a design input (a field of the netlist, constraints, BOM, requirements or manifest, such as `manifest commands[duty]` or `constraints voltages[+3V3]`), and the test's `RULE_ONLY` list of limits that are procgen constants (today the short-check floors and the spin current) is empty.
-- **Status:** done
-- **Pull requests:** [#28](https://github.com/ihsan-sa/npie/pull/28) (the check on the mini-bldc fixture and its variants; seven untraced `derived_from` wordings fixed, plus five on paths no fixture reaches yet); [#30](https://github.com/ihsan-sa/npie/pull/30) (a boost variant of mini-bldc, so the check covers every `power-stage` step and both kinds of trip, all already traced); the PR from `dispatch/31` (the short-check floors and the spin current come from a `bringup` block in constraints.json, the fixture carries one, and `RULE_ONLY` is gone, so any `procgen default` fails the check). A board whose constraints have no `bringup` block still gets the old defaults, and its steps say `procgen default`.

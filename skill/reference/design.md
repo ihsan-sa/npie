@@ -108,8 +108,9 @@ each limit comes from:
    setpoint less up to 3 V (the high side's reverse conduction).
 9. **full-function** - motor connected, low duty, current limit held; a
    person confirms rotation and the supply current stays under 90 % of the
-   limit (constraints `bringup.spin_ilimit_a`, 1 A when the design sets
-   none).
+   limit (constraints `bringup.spin_ilimit_a`, at most 3 A, and 1 A when
+   the design sets none). A `bringup` value that is not a finite number
+   above 0 is refused.
 10. **limits** - operating range corners (VM min and max from the
    requirements), under-voltage trip from the manifest's `vbus_uv_v`
    (expect the fault event within +/-0.5 V); on a firmware with a `pwm`

@@ -180,7 +180,7 @@ def load(ws: str | Path) -> Design:
                     if "net" in v and "voltage" in v}
         power = [p for p in cons.get("power", []) if "net" in p]
         blocks = [b for b in cons.get("blocks", []) if isinstance(b, dict)]
-        bringup = cons.get("bringup") or {}
+        bringup = cons.get("bringup", {})
         if not isinstance(bringup, dict):
             raise DesignError(f"{cons_path}: bringup is not an object")
 

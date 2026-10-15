@@ -145,14 +145,37 @@ def test_without_a_bringup_block_the_defaults_say_so(tmp_path):
     assert by["+3V3 to GND is not a short"]["expect"]["min"] == procgen.R_FLOOR_LOGIC
     assert by["spin current"]["expect"]["max"] == round(0.9 * procgen.SPIN_ILIMIT_A, 3)
     assert all("procgen default" in s["derived_from"] for s in by.values())
+    assert by["VM_IN to GND is not a short"]["derived_from"].endswith(
+        "procgen default short_floor_power_ohm 1000 ohm; the design sets none")
+    assert by["spin current"]["derived_from"].endswith(
+        "procgen default spin_ilimit_a 1 A; the design sets none")
 
 
-def test_a_bringup_limit_that_is_not_a_number_is_refused(tmp_path):
+@pytest.mark.parametrize("key,value", [
+    ("short_floor_power_ohm", "1k"), ("short_floor_power_ohm", "1000"),
+    ("short_floor_logic_ohm", True), ("short_floor_logic_ohm", 0),
+    ("short_floor_power_ohm", -100), ("short_floor_logic_ohm", float("nan")),
+    ("spin_ilimit_a", float("inf")), ("spin_ilimit_a", procgen.SPIN_ILIMIT_MAX_A + 0.5),
+])
+def test_a_bad_bringup_limit_is_refused(tmp_path, key, value):
     ws = tmp_path / "mini-bldc"
     shutil.copytree(FIX, ws)
-    _bringup(ws, {"short_floor_power_ohm": "1k"})
-    with pytest.raises(design.DesignError, match="short_floor_power_ohm"):
+    _spin(ws)
+    _bringup(ws, {key: value})
+    with pytest.raises(design.DesignError, match=key):
         procgen.generate(design.load(ws))
+
+
+@pytest.mark.parametrize("block", [[], 0, "", False, None])
+def test_a_bringup_that_is_not_an_object_is_refused(tmp_path, block):
+    ws = tmp_path / "mini-bldc"
+    shutil.copytree(FIX, ws)
+    cp = ws / "kicad" / "constraints.json"
+    c = json.loads(cp.read_text())
+    c["bringup"] = block
+    cp.write_text(json.dumps(c))
+    with pytest.raises(design.DesignError, match="bringup is not an object"):
+        design.load(ws)
 
 
 def test_the_boost_variant_reaches_every_power_stage_check(tmp_path):
