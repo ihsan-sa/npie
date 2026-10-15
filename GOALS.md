@@ -66,6 +66,7 @@ What has landed, from the git history (a line per PR). A proposed goal that clos
 - [#58](https://github.com/ihsan-sa/npie/pull/58) Abort a waiting run when its design changes before resume
 - [#60](https://github.com/ihsan-sa/npie/pull/60) Name the rail behind each current limit, not constraints power[]
 - [#62](https://github.com/ihsan-sa/npie/pull/62) Close the PDF-on-any-host goal; update docs and run notes
+- [#64](https://github.com/ihsan-sa/npie/pull/64) Hold every supply setpoint to the input's rated voltage
 
 ### Every limit names its design input
 
@@ -170,4 +171,11 @@ What has landed, from the git history (a line per PR). A proposed goal that clos
 - **Serves:** Limits from the design
 - **Done when:** `make check VENV=/home/dispatch-w-npie/venvs/npie` passes with `tests/test_npie_rated_input.py` generating every fixture variant of `tests/test_npie_limit_fields.py`, plus a requirements VIN range that tops out above the input's rating in constraints `voltages[]`, one whose first power is already above it, and a board with no input net whose firmware can spin, and finding no `supply` step above the input's rating or the requirements' VIN max; the over-rated corner and first power listed in `skipped` with both numbers; and no supply step at all, full-function included, when there is no input net.
 - **Status:** done
-- **Pull requests:** the PR from `dispatch/63` (procgen took the first power and the VIN corners from requirements.md alone and never compared them with the input's rating in constraints, so "Input 8-40 V operating" on a 30 V-rated input gave a 40 V supply step, against SKILL.md's rule 4. With no input net, full-function spun the motor at a 12 V procgen constant (`SPIN_V_DEFAULT`) that no design input gave. Now `_Builder.over_rating` holds each of those setpoints to the rating, and a setpoint above it is listed as not applied. Full-function needs the power-up stage's setpoint, and `SPIN_V_DEFAULT` is gone).
+- **Pull requests:** [#64](https://github.com/ihsan-sa/npie/pull/64) (procgen took the first power and the VIN corners from requirements.md alone and never compared them with the input's rating in constraints, so "Input 8-40 V operating" on a 30 V-rated input gave a 40 V supply step, against SKILL.md's rule 4. With no input net, full-function spun the motor at a 12 V procgen constant (`SPIN_V_DEFAULT`) that no design input gave. Now `_Builder.over_rating` holds each of those setpoints to the rating, and a setpoint above it is listed as not applied. Full-function needs the power-up stage's setpoint, and `SPIN_V_DEFAULT` is gone).
+
+### A run waiting on a person has its PDF too
+
+- **Serves:** Every run on record
+- **Done when:** `make check VENV=/home/dispatch-w-npie/venvs/npie` passes with `tests/test_npie_run_report.py` holding a dry run on a person (`--hold`) and finding, after `start` and after a `confirm` that leaves it waiting, a `report.pdf` starting `%PDF-` whose report names the run as not ended and says what it waits on: the person and the step (with its text) after `start`, a `resume` from the confirmed step after `confirm`.
+- **Status:** done
+- **Pull requests:** the PR from `dispatch/66` (`npie_run.py` built the PDF only once a run ended, so a run left waiting on a person, which on a real bench can be days or for good, had only `report.tex` and no PDF. Now every `start`, `confirm` and `resume` writes the PDF, and a waiting run's first page says it has not ended and names the step, with its text, that waits on a person, or the `resume` it needs after a confirmation. Before this, the callout said only "It stopped at <step>").

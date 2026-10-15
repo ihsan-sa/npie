@@ -13,9 +13,9 @@ reasons, and the scope captures as figures. A limit a person set in
 bringup/overrides.yaml is called out on the first page with the generated
 one it replaced. A failed, aborted or unfinished
 run still gets a report; its first page says so and names the step it
-stopped at and the safe state it left. npie_run.py calls write() itself
-whenever a run stops, so this script is for a rebuild or a run still
-waiting on a person.
+stopped at and the safe state it left; one waiting on a person says it has
+not ended and what it waits on. npie_run.py calls write() itself whenever a
+run stops, a wait included, so this script is for a rebuild.
 
 Set in pdf-material-builder's house style: housestyle.sty used by path
 (NPIE_HOUSE_STYLE, else the copy vendored in reference/house-style beside
@@ -118,6 +118,11 @@ def build_tex(rdir: Path, run: dict, proc: dict) -> str:
         fails = [r["id"] for r in run["steps"] if r.get("verdict") == "fail"]
         why = run.get("error") or ("" if fails or not run.get("cursor")
                                    else f"It stopped at {run['cursor']}")
+        if status == "awaiting_human":    # not ended: this report is the run so far
+            cur = run["cursor"]
+            why = (f"It has not ended: {cur} is confirmed and the run waits to be resumed "
+                   "from it" if cur in got else f"It has not ended: it waits on a person at "
+                   f"{cur} ({steps.get(cur, (0, {}))[1].get('text', '')})")
         B.append(r"\begin{hscallout}{Not a pass}" + "This run is " + esc(status)
                  + (". Failed: " + esc(", ".join(fails)) if fails else "")
                  + (". " + esc(why) if why else "") + ". Safe state: "

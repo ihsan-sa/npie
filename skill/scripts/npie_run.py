@@ -28,8 +28,8 @@ SIGTERM or SIGHUP the supply outputs go off before the run stops (a Ctrl-C or
 signal aborts it, exit 128 + the signal: 130, 143, 129), so no run is left
 "running" behind a dead process: not a killed one, a timed-out job's or a
 dropped ssh session's either. Whenever start, confirm or resume leaves a run, it writes the
-run's report (npie_report.py): report.tex every time, and report.pdf too once
-the run has ended (passed, failed or aborted), so every run is on record. A
+run's report (npie_report.py): report.tex and report.pdf, a run waiting on a
+person included (its report says it has not ended), so every run is on record. A
 report that cannot be built is a warning under "report", never the run's
 outcome. Prints JSON {ok, run, status, cursor, awaiting?, failed?, report, ...}.
 Exit 0 passed, 1 failed or awaiting a person (status says which), 2 error or
@@ -89,11 +89,10 @@ def _catch_stop_signals() -> dict:
 
 
 def _report(run: runner.Run) -> dict:
-    """The run's report as it stands; the PDF only once the run has ended."""
-    waiting = run.rec["status"] in ("running", "awaiting_human")
+    """The run's report as it stands, PDF included: a run left waiting on a
+    person may never be resumed, so it is on record too."""
     try:
-        r = npie_report.write(run.dir, tex_only=waiting,
-                              why_tex_only="run not ended (npie_report.py --run for one now)")
+        r = npie_report.write(run.dir)
     except Exception as exc:     # a report bug must not hide the run's own outcome
         return {"ok": False, "tex": None, "pdf": None,
                 "warnings": [f"report not written: {type(exc).__name__}: {exc}"]}

@@ -2,9 +2,9 @@
 
 Each case dry-runs the mini-bldc fixture to one way a run can stop (passed,
 failed, aborted, waiting on a person) and checks that the run dir holds a
-report.tex that names that status, and that the JSON names the report. An
-ended run also gets report.pdf: in the house style where lualatex is on the
-host, elsewhere a plain one, and the JSON says why. With NPIE_REQUIRE_PDF=1,
+report.tex that names that status, and that the JSON names the report. Each
+run, a waiting one too, also gets report.pdf: in the house style where
+lualatex is on the host, elsewhere a plain one, and the JSON says why. With NPIE_REQUIRE_PDF=1,
 as CI sets it, a host without lualatex fails here instead of passing on the
 plain PDF. Nothing here opens an instrument.
 """
@@ -47,21 +47,20 @@ def _run(*args):
     return r.returncode, json.loads(r.stdout)
 
 
-def _on_record(out, status, ended=True):
+def _on_record(out, status):
     run = Path(out["run"])
     rep = out["report"]
     assert out["status"] == status and rep["tex"] == str(run / "report.tex"), out
     tex = (run / "report.tex").read_text(encoding="ascii")
     assert f"{npie_report.esc(status)}, " in tex       # the title block's status line
     assert ("Not a pass" in tex) == (status != "passed")
-    if ended:
-        # every ended run leaves a PDF: the house style's, else the plain one
-        assert rep["pdf"] == str(run / "report.pdf"), rep
-        assert (run / "report.pdf").read_bytes()[:5] == b"%PDF-", rep
-        assert rep["ok"] if PDF_HOST else "plain PDF" in rep["warnings"][-1], rep
-    else:
-        assert rep["pdf"] is None and "run not ended" in rep["warnings"][0], rep
-        assert not (run / "report.pdf").exists()
+    # every run leaves a PDF, ended or waiting: the house style's, else the plain one
+    assert rep["pdf"] == str(run / "report.pdf"), rep
+    pdf = (run / "report.pdf").read_bytes()
+    assert pdf[:5] == b"%PDF-", rep
+    assert rep["ok"] if PDF_HOST else "plain PDF" in rep["warnings"][-1], rep
+    if not PDF_HOST:     # the plain PDF holds the report's words
+        assert _flat("\n".join(npie_report.plain_text(tex))) in _flat(pdf_text(pdf))
     return tex
 
 
@@ -150,13 +149,19 @@ def test_an_aborted_run_leaves_its_report(tmp_path, monkeypatch, capsys):
 
 
 def test_a_run_waiting_on_a_person_leaves_its_report_so_far(tmp_path):
+    # a run left waiting may never be resumed, so it has its PDF too, saying
+    # it has not ended and what it waits on
     rc, out = _run("start", "--workspace", str(_ws(tmp_path)), "--dry-run", "--hold")
     assert rc == 1
-    _on_record(out, "awaiting_human", ended=False)
-    # confirming updates it; a failed confirmation ends the run and records why
+    tex = _on_record(out, "awaiting_human")
     run, step = out["run"], out["awaiting"]["step"]
+    assert _flat(npie_report.esc(f"It has not ended: it waits on a person at {step} "
+                                 f"({out['awaiting']['text']})")) in _flat(tex)
+    # confirming updates it; a failed confirmation ends the run and records why
     rc, out = _run("confirm", "--run", run, "--step", step, "--by", "ihsan")
-    _on_record(out, "awaiting_human", ended=False)
+    tex = _on_record(out, "awaiting_human")
+    assert npie_report.esc(f"It has not ended: {step} is confirmed and the run waits to be "
+                           "resumed from it") in tex
     rc, out = _run("resume", "--run", run)
     rc, out = _run("confirm", "--run", run, "--step", out["awaiting"]["step"], "--by", "ihsan",
                    "--fail", "R12 missing")
