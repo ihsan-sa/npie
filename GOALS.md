@@ -22,13 +22,6 @@ Filed by runs. Each says what done looks like as something a run can check, and 
 - **Done when:** #19 is merged into main; on main, the amp matcher in `skill/scripts/npielib/procgen.py` accepts TAS5825M, TAS5825P, TAS5828M, TPA3245 and TPA3255; a test in `tests/test_npie_usb_first.py` generates the USB-first plan for a board whose amp is one of the three new parts; and `make check` passes on main.
 - **Pull requests:** none landed yet; the work is [#19](https://github.com/ihsan-sa/npie/pull/19) itself.
 
-### Every limit field names its source
-
-- **Serves:** Limits from the design
-- **Done when:** `make check VENV=/home/dispatch-w-npie/venvs/npie` passes with `tests/test_npie_limit_fields.py` nudging each numeric procgen constant in turn, regenerating every fixture variant of `tests/test_npie_limit_trace.py`, and finding no step whose `expect` or `fields` moved while its `derived_from` stayed the same, with its `UNDISCLOSED` list empty.
-- **Status:** open
-- **Pull requests:** the PR from `dispatch/37`
-
 ## Later
 
 Goals waiting for an open slot. When a proposed goal closes, the run that closed it moves the top one here up into Proposed goals as open.
@@ -52,6 +45,7 @@ What has landed, from the git history (a line per PR). A proposed goal that clos
 - [#28](https://github.com/ihsan-sa/npie/pull/28) Check every generated limit names its design input
 - [#30](https://github.com/ihsan-sa/npie/pull/30) Record the boost trace step in GOALS.md and run notes
 - [#34](https://github.com/ihsan-sa/npie/pull/34) Close the limit-trace goal in GOALS.md and add run notes
+- [#36](https://github.com/ihsan-sa/npie/pull/36) Write each run's report from npie_run.py when it stops
 
 ### Every limit names its design input
 
@@ -65,4 +59,11 @@ What has landed, from the git history (a line per PR). A proposed goal that clos
 - **Serves:** Every run on record
 - **Done when:** `make check VENV=/home/dispatch-w-npie/venvs/npie` passes with `tests/test_npie_run_report.py` dry-running `npie_run.py` to each way a run stops (passed, failed, aborted, waiting on a person, and failed by a person's confirmation), and finding in each run dir a `report.tex` that names the run's status and a `report` entry in the JSON that gives the PDF, or says why there is none (lualatex missing, or the run not ended yet); on a host with lualatex the ended runs must have `report.pdf`.
 - **Status:** done
-- **Pull requests:** the PR from `dispatch/35` (`npie_run.py` calls `npie_report.write()` whenever start, confirm or resume leaves a run: the `.tex` every time, the PDF once the run ends; a report error is a warning and never the run's outcome. Before this, a run left only `run.json` until someone ran `npie_report.py`, and the report tests covered only passed and failed runs).
+- **Pull requests:** [#36](https://github.com/ihsan-sa/npie/pull/36) (`npie_run.py` calls `npie_report.write()` whenever start, confirm or resume leaves a run: the `.tex` every time, the PDF once the run ends; a report error is a warning and never the run's outcome. Before this, a run left only `run.json` until someone ran `npie_report.py`, and the report tests covered only passed and failed runs).
+
+### Every limit field names its source
+
+- **Serves:** Limits from the design
+- **Done when:** `make check VENV=/home/dispatch-w-npie/venvs/npie` passes with `tests/test_npie_limit_fields.py` nudging each numeric procgen constant in turn, regenerating every fixture variant of `tests/test_npie_limit_trace.py`, and finding no step whose `expect` or `fields` moved while its `derived_from` stayed the same, with its `UNDISCLOSED` list empty.
+- **Status:** done
+- **Pull requests:** the PR from `dispatch/37` (the per-step trace check passed a step on one field's source while another field came from a hidden constant; nudging found nine such steps from `IDLE_FLOOR_A`, `DIODE_V` and `FIRST_ILIMIT_A`, and their `derived_from` now states the alive floor, the diode band and the 90 % current ceiling. Numbers written inline in procgen, not as constants, aren't nudged yet).
