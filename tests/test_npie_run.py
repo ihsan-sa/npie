@@ -31,6 +31,11 @@ def _ws(tmp_path) -> Path:
 
 def _run(*args, env=None):
     e = {k: v for k, v in os.environ.items() if k != "NPIE_BENCH_HOST"}
+    # these cases check the run, not its PDF (test_npie_run_report compiles
+    # that): with lualatex on the host, every confirm and resume here was two
+    # house-style passes, over half the suite's time. A missing engine gives
+    # the plain PDF, so the report is still written each time.
+    e["NPIE_LUALATEX"] = str(ROOT / "no-lualatex-in-test_npie_run")
     e.update(env or {})
     r = subprocess.run([sys.executable, str(NPIE / "npie_run.py"), *args],
                        capture_output=True, text=True, env=e)

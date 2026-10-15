@@ -131,7 +131,10 @@ limit that looks wrong can be traced to the input that made it.
 
 Limits are generated, not hand-written; a board whose limits need
 adjusting gets `bringup/overrides.yaml` (step id -> expect), which the
-generator applies and records.
+generator applies and records. An override must be one the runner can hold
+the step to, or the generator refuses it (exit 2, naming the step): only
+`min`, `max` and `nominal` (`edges_min` on a logic step), each a finite
+number, the merged min not above the max and the nominal between them.
 
 ### Step types
 

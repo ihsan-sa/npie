@@ -68,6 +68,7 @@ What has landed, from the git history (a line per PR). A proposed goal that clos
 - [#62](https://github.com/ihsan-sa/npie/pull/62) Close the PDF-on-any-host goal; update docs and run notes
 - [#64](https://github.com/ihsan-sa/npie/pull/64) Hold every supply setpoint to the input's rated voltage
 - [#67](https://github.com/ihsan-sa/npie/pull/67) Write the report PDF for a run waiting on a person too
+- [#69](https://github.com/ihsan-sa/npie/pull/69) Read the VIN range however requirements.md writes it
 
 ### Every limit names its design input
 
@@ -186,4 +187,11 @@ What has landed, from the git history (a line per PR). A proposed goal that clos
 - **Serves:** Limits from the design
 - **Done when:** `make check VENV=/home/dispatch-w-npie/venvs/npie` passes with `tests/test_npie_requirements_range.py` finding `design._vin_range` read 8-24 V from each wording in its `READ` list (an ASCII hyphen, an en or em dash, `to`, `..`, a unit on both numbers, `VDC`, and `Operating input: 8-24 V`), no range from each line in `NOT_A_RANGE` (no "operating", not volts, not on one line), and, on the fixture with `Input 8–24 V operating range.`, neither VIN corner skipped and the supply set to 8 V and 24 V by steps that say `requirements VIN min 8 V` and `requirements VIN max 24 V`.
 - **Status:** done
-- **Pull requests:** the PR from `dispatch/68` (requirements.md is prose a person writes, and the range regex took only `A-B V operating` with an ASCII hyphen. An en dash, which editors put in for you, or `8 V to 24 V`, `VDC`, or `Operating input: 8-24 V` gave no range, with no warning: the first power fell back to half the input's rating (`VIN_NO_RANGE_FRAC`) and both VIN corners were skipped as "no operating range", on a board whose design gives one).
+- **Pull requests:** [#69](https://github.com/ihsan-sa/npie/pull/69) (requirements.md is prose a person writes, and the range regex took only `A-B V operating` with an ASCII hyphen. An en dash, which editors put in for you, or `8 V to 24 V`, `VDC`, or `Operating input: 8-24 V` gave no range, with no warning: the first power fell back to half the input's rating (`VIN_NO_RANGE_FRAC`) and both VIN corners were skipped as "no operating range", on a board whose design gives one).
+
+### Every override is a limit the runner holds a step to
+
+- **Serves:** Limits from the design
+- **Done when:** `make check VENV=/home/dispatch-w-npie/venvs/npie` passes with `tests/test_npie_overrides.py` finding procgen refuse, naming the step, each override in its `REFUSED` list (a key the runner doesn't check, such as `mx` or `unit`, or `min` on a logic step; a value that isn't a finite number: null, `5.2 V`, true, nan, inf; an empty override; a min above the max; a nominal outside them), `procedure_gen.py` exit 2 on one without writing `procedure.json`, and every limit of every fixture variant of `tests/test_npie_limit_fields.py` accepted unchanged as its own override.
+- **Status:** done
+- **Pull requests:** the PR from `dispatch/70` (`bringup/overrides.yaml` is the one way a person, not the design, sets a limit, and procgen merged whatever it held into `expect`. A misspelt `mx: 5.2` left the generated max in force while the report called the step overridden. `max: null` dropped the bound, so any reading passed. `max: 5.2 V` reached the runner as a string and aborted the run at that step on the bench. `{}` was recorded as an override, and a min above the max failed every reading. `procgen._override_error` now refuses each, naming the step).
