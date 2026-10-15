@@ -46,8 +46,10 @@ interactive.
    requirements' operating range and the input's rating in constraints
    `voltages[]`; a setpoint or protection trip above either is listed as
    not applied.
-5. **Regenerate after any design or firmware change.** The procedure
-   carries its inputs' hashes and the runner refuses a stale one.
+5. **Regenerate after any design or firmware change, and after updating
+   npie.** The procedure carries its inputs' hashes, and the runner refuses
+   a stale one, or one that isn't what procedure_gen.py makes from the
+   design now (an older npie wrote it, or it was edited by hand).
 
 ## Firmware
 
