@@ -63,6 +63,7 @@ What has landed, from the git history (a line per PR). A proposed goal that clos
 - [#52](https://github.com/ihsan-sa/npie/pull/52) Close the loose-number goal in GOALS.md and add run notes
 - [#54](https://github.com/ihsan-sa/npie/pull/54) Build every report PDF in CI and fail when lualatex is missing
 - [#56](https://github.com/ihsan-sa/npie/pull/56) Show every limit and its source in the run report
+- [#58](https://github.com/ihsan-sa/npie/pull/58) Abort a waiting run when its design changes before resume
 
 ### Every limit names its design input
 
@@ -146,4 +147,11 @@ What has landed, from the git history (a line per PR). A proposed goal that clos
 - **Serves:** Limits from the design
 - **Done when:** `make check VENV=/home/dispatch-w-npie/venvs/npie` passes with `tests/test_npie_run.py` holding a dry run on a person, changing a design input (`constraints.json` edited, or an `overrides.yaml` added), and finding both `confirm` and `resume` abort the run with exit 2: the error names the changed input, `safe_state` says the supply went off, `report.tex` is written, `confirm` records no answer, and a later `resume` is refused.
 - **Status:** done
-- **Pull requests:** the PR from `dispatch/57` (only `start` checked the design inputs' hashes. A run waiting on a person, which can be days on a real bench, resumed after `constraints.json` changed or an override was added, and went on testing the board against limits the design no longer gave. Now `confirm` and `resume` check them again first and, if any changed, abort the run with the supply off, naming the inputs, so the report records why and a new run starts from the regenerated procedure. With the check off, all four cases of the new test fail).
+- **Pull requests:** [#58](https://github.com/ihsan-sa/npie/pull/58) (only `start` checked the design inputs' hashes. A run waiting on a person, which can be days on a real bench, resumed after `constraints.json` changed or an override was added, and went on testing the board against limits the design no longer gave. Now `confirm` and `resume` check them again first and, if any changed, abort the run with the supply off, naming the inputs, so the report records why and a new run starts from the regenerated procedure. With the check off, all four cases of the new test fail).
+
+### Every design source names its entry
+
+- **Serves:** Limits from the design
+- **Done when:** `make check VENV=/home/dispatch-w-npie/venvs/npie` passes with `tests/test_npie_limit_fields.py` finding, in every fixture variant, no step whose `derived_from` names a list without its entry (a bare `[]`, as in `constraints power[]`), and the first current limit and the idle current naming the `constraints power[<rail>]` entry they come from; and with `tests/test_npie_limit_trace.py` accepting `constraints <field>[...]` only with an entry in the brackets.
+- **Status:** done
+- **Pull requests:** the PR from `dispatch/59` (the trace regex took `constraints power[` as a design input, so `constraints power[]` passed. The first current limit, and the idle-current ceilings built on it (at power-up, while regulating, and at VIN min and max), said "limit from constraints power[]" and never named the rail. The full load is the heaviest rail's, not the rails' sum, and nothing said that either. They now name the rail and its watts and say "the heaviest rail". A rail that follows the input and the sense-amp offset also had a bare `voltages[]`, and now name their rails. Whether the full load should be a sum is the owner's call, so this PR doesn't change it).

@@ -8,6 +8,7 @@ Every limit is derived from a design fact and says which one in the step's
   and power-stage nets; without them 100 ohm and 1 kohm), diode mode 0.3-0.8 V
   across each FET body diode.
 - power-up: supply at VIN min + 2 V, current limit 2x the full-load estimate
+  (the heaviest rail's load in constraints power[], not the rails' sum)
   capped at FIRST_ILIMIT_A; idle current between IDLE_FLOOR_A and
   ILIM_CEIL_FRAC (90 %) of the limit (a supply sitting in current limit is a
   fail). Every number in a limit is a module constant, named in the step's
@@ -373,16 +374,21 @@ class _Builder:
             v = round(d.voltages[self.input] * VIN_NO_RANGE_FRAC, 1)
             v_src = (f"no operating range in requirements: {VIN_NO_RANGE_FRAC:g}x "
                      f"constraints voltages[{_short(self.input)}]")
-        load_w = max((r["v"] * self._rail_current(r["net"]) for r in self.rails
-                      if not r["follows_input"]), default=0.0)
+        # the full load is the heaviest rail's, not the sum of them
+        load_w, heavy = max(((r["v"] * self._rail_current(r["net"]), r["net"])
+                             for r in self.rails if not r["follows_input"]), default=(0.0, None))
         full_a = load_w / EFFICIENCY / v
         ilim = min(FIRST_ILIMIT_A, max(ILIM_FLOOR_A, round(ILIM_LOAD_X * full_a, 2)))
         self.v_first, self.ilim = v, ilim
         self.setpoint = f"the supply setpoint {v:g} V ({v_src})"
+        self.ilim_src = (f"constraints power[{_short(heavy)}] {load_w:g} W, the heaviest rail"
+                         if load_w else "no rail load in constraints power")
         inp, g = self.point(self.input), self.point(self.gnd)
         self.step("supply", role="psu", set={"v": v, "i_limit": ilim, "output": False},
                   derived_from=f"{v_src}; limit min({FIRST_ILIMIT_A} A, max({ILIM_FLOOR_A} A, "
-                               f"{ILIM_LOAD_X:g}x full load {full_a:.3f} A))")
+                               f"{ILIM_LOAD_X:g}x full load {full_a:.3f} A at "
+                               f"{EFFICIENCY * 100:g} % efficiency)), full load from "
+                               f"{self.ilim_src}")
         self.human(f"Connect the supply: + to {inp['label']}, - to {g['label']}. "
                    f"Supply set to {v:g} V / {ilim:g} A, output still off.")
         self.human(f"About to switch the supply on at {v:g} V with a {ilim:g} A limit. "
@@ -393,7 +399,7 @@ class _Builder:
                   expect={"nominal": None, "min": IDLE_FLOOR_A,
                           "max": round(ILIM_CEIL_FRAC * ilim, 4), "unit": "A"},
                   derived_from=f"{_alive()}; {_ceil(ilim)} limit from "
-                               "constraints power[] (not in CC)",
+                               f"{self.ilim_src} (not in CC)",
                   text="idle input current")
         self.human("Touch-test: no part is hot a few seconds after power-up.")
 
@@ -423,8 +429,8 @@ class _Builder:
                 nom = self.v_first
                 exp = {"nominal": nom, "min": round(nom * (1 - below), 3),
                        "max": round(nom * (1 + above), 3), "unit": "V"}
-                src = (f"follows the input (constraints voltages[] rated like "
-                       f"{_short(self.input)}): {self.setpoint} "
+                src = (f"follows the input (constraints voltages[{_short(r['net'])}] rated "
+                       f"like {_short(self.input)}): {self.setpoint} "
                        f"-{below * 100:g} %/+{above * 100:g} %")
             else:
                 tol = TOL_ASYNC if r["async"] else TOL_REG
@@ -501,6 +507,8 @@ class _Builder:
                 if None in vref:
                     continue
                 mid = sum(vref) / 2
+                refs = " and ".join("GND" if n == self.gnd else f"constraints voltages[{_short(n)}]"
+                                    for n in (f["REF1"], f["REF2"]))
                 p = self.point(f["OUT"])
                 self.probe("DMM", p, g, "DC volts")
                 self.step("measure", role="dmm", quantity="voltage",
@@ -509,7 +517,7 @@ class _Builder:
                                   "max": round(mid * (1 + SENSE_REF_TOL), 3), "unit": "V"},
                           derived_from=f"netlist {u} {d.value(u)} REF1={_short(f['REF1'])}, "
                                        f"REF2={_short(f['REF2'])}: zero-current output "
-                                       f"at the mean of their constraints voltages[] "
+                                       f"at the mean of {refs}, {mid:g} V "
                                        f"+/-{SENSE_REF_TOL * 100:g} %",
                           text=f"{u} sense-amp offset")
         leds = d.refs("D")
@@ -654,7 +662,7 @@ class _Builder:
                       expect={"nominal": None, "min": IDLE_FLOOR_A,
                               "max": round(ILIM_CEIL_FRAC * self.ilim, 4), "unit": "A"},
                       derived_from=f"unloaded and regulating: {_alive()}, "
-                                   f"{_ceil(self.ilim)} limit from constraints power[]",
+                                   f"{_ceil(self.ilim)} limit from {self.ilim_src}",
                       text="input current while regulating")
             self.step("console", role="console", send="disarm", expect_re="^OK ",
                       timeout_s=2, derived_from="manifest commands[disarm]")
@@ -816,7 +824,7 @@ class _Builder:
                               "max": round(ILIM_CEIL_FRAC * self.ilim, 4), "unit": "A"},
                       derived_from=f"idle current holds at requirements VIN {end} {v:g} V: "
                                    f"{_alive()}, {_ceil(self.ilim)} limit "
-                                   "from constraints power[]",
+                                   f"from {self.ilim_src}",
                       text=f"idle current at {v:g} V")
         saf = (d.manifest or {}).get("safety", {})
         uv = saf.get("vbus_uv_v")

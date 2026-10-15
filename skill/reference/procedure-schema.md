@@ -20,7 +20,7 @@
        "set": {"v": 12.0, "i_limit": 0.2, "output": true}},
       {"id": "power-up.03", "type": "measure", "role": "psu", "quantity": "current",
        "expect": {"nominal": 0.03, "min": 0.002, "max": 0.2, "unit": "A"},
-       "derived_from": "constraints power[] idle budget via 80% efficiency"}
+       "derived_from": "constraints power[+5V] 1.5 W, the heaviest rail, via 80% efficiency"}
     ]}
   ]
 }
