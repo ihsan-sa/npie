@@ -62,6 +62,7 @@ What has landed, from the git history (a line per PR). A proposed goal that clos
 - [#50](https://github.com/ihsan-sa/npie/pull/50) Reach the boost idle drop and close the fixture-reach goal
 - [#52](https://github.com/ihsan-sa/npie/pull/52) Close the loose-number goal in GOALS.md and add run notes
 - [#54](https://github.com/ihsan-sa/npie/pull/54) Build every report PDF in CI and fail when lualatex is missing
+- [#56](https://github.com/ihsan-sa/npie/pull/56) Show every limit and its source in the run report
 
 ### Every limit names its design input
 
@@ -138,4 +139,11 @@ What has landed, from the git history (a line per PR). A proposed goal that clos
 - **Serves:** Every run on record
 - **Done when:** `make check VENV=/home/dispatch-w-npie/venvs/npie` passes with `tests/test_npie_report_limits.py` building `report.tex` for every fixture variant of `tests/test_npie_limit_fields.py` and finding, for each step with `expect` or `fields`, its whole limit (each console field's included) in its Measurements row and its `derived_from` in its row of "Where each limit came from"; and, dry-running a board with `bringup/overrides.yaml`, a first-page callout naming the overridden step with its limit and the generated one it replaced (and, where lualatex is on the host, the PDF built).
 - **Status:** done
-- **Pull requests:** the PR from `dispatch/55` (the report printed only `expect`, so a console step checked by `fields` (the vbus reading, the closed-loop Vout, a trip's outputs) showed its value with no limit. It skipped every human step in Measurements, so a reading a person typed against a limit (the EVN header's pin voltages) wasn't on record at all. No `derived_from` was in it, so a passed report couldn't show that a person, not the design, had set a limit. Each is now in the report, and a person's override is called out on the first page. The new sections are compiled to PDF first in this PR's CI).
+- **Pull requests:** [#56](https://github.com/ihsan-sa/npie/pull/56) (the report printed only `expect`, so a console step checked by `fields` (the vbus reading, the closed-loop Vout, a trip's outputs) showed its value with no limit. It skipped every human step in Measurements, so a reading a person typed against a limit (the EVN header's pin voltages) wasn't on record at all. No `derived_from` was in it, so a passed report couldn't show that a person, not the design, had set a limit. Each is now in the report, and a person's override is called out on the first page. The new sections are compiled to PDF first in this PR's CI).
+
+### A run never goes on against a changed design
+
+- **Serves:** Limits from the design
+- **Done when:** `make check VENV=/home/dispatch-w-npie/venvs/npie` passes with `tests/test_npie_run.py` holding a dry run on a person, changing a design input (`constraints.json` edited, or an `overrides.yaml` added), and finding both `confirm` and `resume` abort the run with exit 2: the error names the changed input, `safe_state` says the supply went off, `report.tex` is written, `confirm` records no answer, and a later `resume` is refused.
+- **Status:** done
+- **Pull requests:** the PR from `dispatch/57` (only `start` checked the design inputs' hashes. A run waiting on a person, which can be days on a real bench, resumed after `constraints.json` changed or an override was added, and went on testing the board against limits the design no longer gave. Now `confirm` and `resume` check them again first and, if any changed, abort the run with the supply off, naming the inputs, so the report records why and a new run starts from the regenerated procedure. With the check off, all four cases of the new test fail).
