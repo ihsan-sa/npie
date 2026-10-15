@@ -83,6 +83,7 @@ What has landed, from the git history (a line per PR). A proposed goal that clos
 - [#93](https://github.com/ihsan-sa/npie/pull/93) Refuse --by sim on a live run and a non-finite typed reading
 - [#95](https://github.com/ihsan-sa/npie/pull/95) Close the bench-role goal in GOALS.md and add run notes
 - [#97](https://github.com/ihsan-sa/npie/pull/97) List every firmware protection a procedure doesn't test
+- [#99](https://github.com/ihsan-sa/npie/pull/99) Write a run's report whatever host path its board sits under
 
 ### Every limit names its design input
 
@@ -306,4 +307,11 @@ What has landed, from the git history (a line per PR). A proposed goal that clos
 - **Serves:** Every run on record
 - **Done when:** `make check VENV=/home/dispatch-w-npie/venvs/npie` passes with `tests/test_npie_run_report.py::test_a_run_anywhere_on_the_host_leaves_its_report_with_its_captures` dry-running a fixture whose workspace sits under a path with an accent, a space, `#` and `%`, and finding the run's report written (no "report not written" warning), its `report.pdf` built (in the house style where lualatex is), each scope capture drawn by its path from the run dir, and nothing of the host path in `report.tex`.
 - **Status:** done
-- **Pull requests:** the PR from `dispatch/98` (`build_tex` wrote each scope capture's absolute path into `report.tex` unescaped, then checked the `.tex` was ASCII. So a run under a path with an accent in it (a person's name, say) raised there, `npie_run.py` caught it as a warning, and a run that saved a capture, every dry run of the mini-bldc fixture included, ended with no report at all. A `%` or space would have broken the house-style compile instead. lualatex now runs in the run dir and each capture is named from there. With the fix out, the new test fails at "report not written").
+- **Pull requests:** [#99](https://github.com/ihsan-sa/npie/pull/99) (`build_tex` wrote each scope capture's absolute path into `report.tex` unescaped, then checked the `.tex` was ASCII. So a run under a path with an accent in it (a person's name, say) raised there, `npie_run.py` caught it as a warning, and a run that saved a capture, every dry run of the mini-bldc fixture included, ended with no report at all. A `%` or space would have broken the house-style compile instead. lualatex now runs in the run dir and each capture is named from there. With the fix out, the new test fails at "report not written").
+
+### A run whose report can't be built still leaves a PDF
+
+- **Serves:** Every run on record
+- **Done when:** `make check VENV=/home/dispatch-w-npie/venvs/npie` passes with `tests/test_npie_run_report.py` breaking `npie_report.build_tex` (raising an error whose message isn't ASCII) and finding, for a passed run, a failed run and a run waiting on a person after a `confirm`, a `report.pdf` starting `%PDF-` whose text says why `report.tex` wasn't built and holds the run's status, its `safe_state` and each step it ran with its verdict (and, for the confirmed step, who confirmed it), the JSON's `report` naming that PDF with `tex` null, and no `report.tex` left from an earlier call; and `npie_report.py --run` on a run dir with no `procedure.json` exiting 1 with that PDF, and 2 once `run.json` is gone too.
+- **Status:** done
+- **Pull requests:** the PR from `dispatch/100` (#99 named the gap: `npie_report.write` called `build_tex` unguarded, so any bug in it, or a missing or broken `procedure.json`, left an ended run with no `.tex` and no PDF, only a "report not written" warning. A waiting run kept its earlier `report.tex`, which still said it waited at a step already confirmed. Now `write` falls back to `bare_lines`: what run.json alone says, in the same plain PDF, and removes a stale `.tex`. The plain PDF now writes a non-ASCII character as `?` rather than raising. With the npie_report change stashed, all 4 new or changed tests fail).

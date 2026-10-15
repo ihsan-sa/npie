@@ -195,12 +195,73 @@ def test_a_run_anywhere_on_the_host_leaves_its_report_with_its_captures(tmp_path
     assert str(tmp_path) not in tex
 
 
+def _broken(*a, **k):
+    raise KeyError("board José")    # an error message can carry anything
+
+
+def _bare(out) -> str:
+    """The run.json-only PDF's text, after checking it is what the JSON names."""
+    run, rep = Path(out["run"]), out["report"]
+    assert not rep["ok"] and rep["tex"] is None and rep["pdf"] == str(run / "report.pdf"), rep
+    assert rep["warnings"][0].startswith("report.tex was not built: KeyError"), rep
+    assert not (run / "report.tex").exists()
+    text = pdf_text((run / "report.pdf").read_bytes())
+    assert _flat(text).startswith(_flat("Plain report from run.json alone, since the report.tex "
+                                        "was not built: KeyError: 'board Jos?'.")), text[:200]
+    rec = json.loads((run / "run.json").read_text(encoding="utf-8"))
+    assert _flat(f"Run {run.name}: {rec['status']}") in _flat(text)
+    if rec.get("safe_state"):
+        assert _flat(f"safe_state: {rec['safe_state']}") in _flat(text)
+    for r in rec["steps"]:      # every step it ran, with its verdict
+        assert _flat(f"{r['id']} | {r['type']} | {r.get('verdict', '-')}") in _flat(text), r["id"]
+    return text
+
+
 def test_a_report_error_does_not_change_the_runs_outcome(tmp_path, monkeypatch, capsys):
-    def broken(*a, **k):
-        raise KeyError("board")
-    monkeypatch.setattr(npie_report, "build_tex", broken)
+    monkeypatch.setattr(npie_report, "build_tex", _broken)
     monkeypatch.delenv("NPIE_BENCH_HOST", raising=False)
     rc = npie_run.main(["start", "--workspace", str(_ws(tmp_path)), "--dry-run"])
     out = json.loads(capsys.readouterr().out)
     assert rc == 0 and out["status"] == "passed"
-    assert not out["report"]["ok"] and "KeyError" in out["report"]["warnings"][0]
+    _bare(out)
+
+
+def test_a_failed_run_whose_report_cannot_be_built_still_leaves_a_pdf(tmp_path, monkeypatch, capsys):
+    # a bug in build_tex used to leave an ended run with no report at all
+    monkeypatch.setattr(npie_report, "build_tex", _broken)
+    monkeypatch.delenv("NPIE_BENCH_HOST", raising=False)
+    rc = npie_run.main(["start", "--workspace", str(_ws(tmp_path)), "--dry-run",
+                        "--fault", "short:+5V"])
+    out = json.loads(capsys.readouterr().out)
+    assert rc == 1 and out["status"] == "failed"
+    text = _bare(out)
+    assert _flat("safe_state: supply outputs off") in _flat(text)
+    assert _flat(f"{out['failed']['id']} | ") in _flat(text)
+
+
+def test_a_waiting_run_whose_report_cannot_be_built_drops_the_stale_one(tmp_path, monkeypatch,
+                                                                          capsys):
+    # start's report.tex says the run waits at its first step; once a confirm
+    # can't rebuild it, it would say so of a run that has moved on
+    rc, out = _run("start", "--workspace", str(_ws(tmp_path)), "--dry-run", "--hold")
+    run, step = out["run"], out["awaiting"]["step"]
+    assert (Path(run) / "report.tex").is_file()
+    monkeypatch.setattr(npie_report, "build_tex", _broken)
+    monkeypatch.delenv("NPIE_BENCH_HOST", raising=False)
+    npie_run.main(["confirm", "--run", run, "--step", step, "--by", "ihsan"])
+    out = json.loads(capsys.readouterr().out)
+    assert out["status"] == "awaiting_human"
+    assert _flat(f"{step} | human | pass | - | by ihsan") in _flat(_bare(out))
+
+
+def test_a_run_dir_with_no_procedure_still_gets_a_pdf(tmp_path, capsys):
+    rc, out = _run("start", "--workspace", str(_ws(tmp_path)), "--dry-run")
+    run = Path(out["run"])
+    (run / "procedure.json").unlink()
+    assert npie_report.main(["--run", str(run)]) == 1
+    rep = json.loads(capsys.readouterr().out)
+    assert rep["tex"] is None and rep["warnings"][0].startswith(
+        "report.tex was not built: FileNotFoundError"), rep
+    assert "Run " + run.name + ": passed" in pdf_text((run / "report.pdf").read_bytes())
+    (run / "run.json").unlink()      # no run.json: not a run
+    assert npie_report.main(["--run", str(run)]) == 2

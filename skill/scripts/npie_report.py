@@ -24,12 +24,15 @@ temp dir so only report.pdf lands in the run. The .tex is pure ASCII.
 Where lualatex or the house style is missing, or the compile fails,
 report.pdf is a plain one instead: the .tex's words in Courier (captures
 named, not drawn), written in pure Python so every host leaves a PDF.
+Where report.tex itself can't be built (procedure.json missing or broken,
+or a bug here), report.pdf is a plain one of what run.json alone says: the
+status, why it stopped, the safe state and each step's result.
 
 Prints JSON {ok, run, status, tex, pdf, warnings}.
 Exit 0 house-style PDF written; 1 degraded (--tex-only: report.tex, no PDF;
 or lualatex / the house style missing or the compile failed: report.tex and
-the plain report.pdf); 2 error (no run.json or procedure.json). Never
-interactive.
+the plain report.pdf; or report.tex not built: the run.json-only
+report.pdf); 2 error (no readable run.json). Never interactive.
 """
 from __future__ import annotations
 
@@ -324,7 +327,37 @@ def plain_text(tex: str) -> list[str]:
 
 
 def _pdf_str(s: str) -> str:
+    s = "".join(c if 32 <= ord(c) < 127 else "?" for c in s)  # the PDF is written as ASCII
     return s.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+
+
+def bare_lines(rdir: Path, run: dict, why: str) -> list[str]:
+    """What run.json alone says of a run, for a report.tex that couldn't be
+    built: its status, why it stopped, its safe state and each step it ran."""
+    out = [f"Plain report from run.json alone, since the {why}. npie_report.py --run "
+           "<this dir> rebuilds the full report once that is fixed.", "",
+           f"Bring-up report{' (simulated bench)' if run.get('bench') == 'sim' else ''}",
+           f"Board: {run.get('board')}", f"Run {rdir.name}: {run.get('status')}"]
+    out += [f"{k}: {run[k]}" for k in ("error", "cursor", "safe_state", "bench", "started",
+                                       "finished", "procedure_sha256") if run.get(k)]
+    def n(v):
+        return f"{v:.6g}" if isinstance(v, (int, float)) and not isinstance(v, bool) else str(v)
+    out += ["", "Steps run", "========="]
+    for r in run.get("steps") or []:
+        if not isinstance(r, dict):
+            out.append(str(r))
+            continue
+        val = r.get("value")
+        if isinstance(val, dict):
+            val = ", ".join(f"{k}={v}" for k, v in val.items())
+        elif r.get("fields"):
+            val = ", ".join(f"{k}={n(v)}" for k, v in r["fields"].items())
+        cells = [r.get("id"), r.get("type"), r.get("verdict", "-"),
+                 "-" if val is None else f"{n(val)} {r.get('unit') or ''}".strip()]
+        if r.get("confirmed_by"):
+            cells.append(f"by {r['confirmed_by']}")
+        out.append(" | ".join(str(c) for c in cells))
+    return out
 
 
 def plain_pdf(lines: list[str], path: Path) -> None:
@@ -360,14 +393,23 @@ def plain_pdf(lines: list[str], path: Path) -> None:
 def write(rdir: Path, tex_only: bool = False, why_tex_only: str = "--tex-only") -> dict:
     """report.tex, then report.pdf unless tex_only -> {ok, run, status, tex,
     pdf, warnings}. Where the house-style PDF can't be built, report.pdf is
-    the plain one and ok is false. Raises OSError / ValueError on a dir that
-    is not a run; npie_run.py calls this whenever a run stops."""
+    the plain one and ok is false. Where report.tex can't be built (no
+    procedure.json, or a bug here), report.pdf is what run.json alone says
+    and tex is None. Raises OSError / ValueError on a dir with no readable
+    run.json; npie_run.py calls this whenever a run stops."""
     run = json.loads((rdir / "run.json").read_text(encoding="utf-8"))
-    proc = json.loads((rdir / "procedure.json").read_text(encoding="utf-8"))
     tex = rdir / "report.tex"
-    src = build_tex(rdir, run, proc)
-    tex.write_text(src, encoding="ascii")
     pdf = tex.with_suffix(".pdf")
+    try:
+        proc = json.loads((rdir / "procedure.json").read_text(encoding="utf-8"))
+        src = build_tex(rdir, run, proc)
+    except Exception as exc:     # the run still ends on record, from run.json alone
+        why = f"report.tex was not built: {type(exc).__name__}: {exc}"
+        tex.unlink(missing_ok=True)  # an earlier one would claim an earlier status
+        plain_pdf(bare_lines(rdir, run, why), pdf)
+        return {"ok": False, "run": str(rdir), "status": run.get("status"), "tex": None,
+                "pdf": str(pdf), "warnings": [why, "plain PDF from run.json alone written instead"]}
+    tex.write_text(src, encoding="ascii")
     warn = []
     if tex_only:
         warn.append(f"{why_tex_only}: no PDF built")
