@@ -133,7 +133,13 @@ each limit comes from:
    not run, with the reason. No supply setpoint in any stage goes above
    the input's rating in constraints `voltages[]` either: a VIN corner or
    a first power above it is listed as not applied, and with no power-up
-   stage there is no full-function stage.
+   stage there is no full-function stage. Every protection the manifest
+   gives is tested or listed as not tested, naming it: an under-voltage
+   trip at or above VIN min, or an over-voltage trip at or below VIN max,
+   is listed (the design trips inside its own operating range), as is
+   `i_trip_a` (no step loads the board past it), each `trips[]` entry no
+   duty reaches or whose sense net is missing, and every `trips[]` entry
+   on a board with no boost.
 
 Every measured step carries `expect` = {nominal, min, max, unit} and a
 `derived_from` string naming the design fact it came from (`constraints
