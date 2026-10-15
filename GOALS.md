@@ -26,7 +26,7 @@ Filed by runs. Each says what done looks like as something a run can check, and 
 - **Serves:** Limits from the design
 - **Done when:** `make check` passes with `tests/test_npie_limit_trace.py` generating, from fixture boards only (no boards repo), every stage procgen emits, `power-stage` for a boost included, and finding no step with `expect` or `fields` whose `derived_from` does not point into a design input (a field of the netlist, constraints, BOM, requirements or manifest, such as `manifest commands[duty]` or `constraints voltages[+3V3]`), and the test's `RULE_ONLY` list of limits that are procgen constants (today the short-check floors and the spin current) is empty.
 - **Status:** open
-- **Pull requests:** the PR from `dispatch/27` (the check on the mini-bldc fixture and its variants; seven untraced `derived_from` wordings fixed, plus five on paths no fixture reaches yet). Next: a small boost fixture so the check covers `power-stage`.
+- **Pull requests:** the PR from `dispatch/27` (the check on the mini-bldc fixture and its variants; seven untraced `derived_from` wordings fixed, plus five on paths no fixture reaches yet); the PR from `dispatch/29` (a boost variant of mini-bldc, so the check covers every `power-stage` step and both kinds of trip, all already traced). Next: give the short-check floors and the spin current a design input, so `RULE_ONLY` can be emptied.
 
 ## Later
 
