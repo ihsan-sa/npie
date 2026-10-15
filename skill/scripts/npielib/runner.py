@@ -6,7 +6,7 @@ run.json (schema npie-run/1, reference/procedure-schema.md), procedure.json
 half-way) and captures/ (scope screenshots). A simulated run that holds at
 human steps also keeps sim-board.pickle there until it finishes, because the
 simulated board's state has to survive between invocations the way a real
-board's does.
+board's does. run.lock is held by the process driving the run (Run.claim).
 
 The engine never waits on a person: a human step ends the invocation with
 status awaiting_human, `confirm` records the answer and `advance` carries on.
@@ -18,15 +18,23 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import pickle
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 
+try:
+    import fcntl
+except ImportError:      # Windows
+    fcntl = None
+    import msvcrt
+
 from . import design, instruments, procgen
 
 SCHEMA = "npie-run/1"
 SIM_PICKLE = "sim-board.pickle"
+LOCK = "run.lock"        # held by the process driving the run; the OS lets go when it dies
 
 
 class RunError(Exception):
@@ -114,6 +122,43 @@ class Run:
         self.steps = _steps(self.proc)
         self.ws = Path(self.rec["workspace"])
         self.bench = None
+        self._lock = None
+
+    def claim(self):
+        """Hold the run for this process until release() or the process ends.
+        Two processes driving one run would drive one bench; and a run still
+        "running" that a process can claim is one whose process died
+        (abort_orphaned)."""
+        f = open(self.dir / LOCK, "a+", encoding="ascii")
+        try:
+            f.seek(0)
+            if fcntl is not None:
+                fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            else:
+                msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
+        except OSError:
+            try:
+                f.seek(0)
+                pid = f.read().strip()
+            except OSError:      # Windows won't read a locked byte
+                pid = ""
+            f.close()
+            raise RunError(f"another npie_run.py process{f' (pid {pid})' if pid else ''} "
+                           f"is driving {self.dir.name}; wait for it to stop, or stop it") from None
+        f.seek(0)
+        f.truncate()
+        f.write(f"{os.getpid()}\n")
+        f.flush()
+        self._lock = f
+
+    def release(self):
+        f, self._lock = self._lock, None
+        if f is None:
+            return
+        if fcntl is None:
+            f.seek(0)
+            msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
+        f.close()
 
     def save(self):
         (self.dir / "run.json").write_text(json.dumps(self.rec, indent=1) + "\n",
@@ -380,6 +425,26 @@ def advance(run: Run) -> Run:
     finally:
         run.save()
         run.keep_sim()
+
+
+def abort_orphaned(run: Run) -> bool:
+    """A run still "running" that this process could claim was left by one
+    that died mid-step with no say (SIGKILL, out of memory, its host went
+    down): nothing is known of that step or of the supply since, so abort it,
+    supply off, rather than carry on as if the step had not begun."""
+    if run.rec["status"] != "running":
+        return False
+    run.rec["error"] = (f"{run.rec['cursor']}: the npie_run.py process running it stopped "
+                        "without ending it (killed, or its host went down)")
+    try:
+        if run.bench is None:
+            run.open_bench()
+    except Exception as exc:     # safe_state then says the supply is not confirmed off
+        run.rec["error"] += f"; bench not opened: {type(exc).__name__}: {exc}"
+    run.finish("aborted", "process lost")
+    run.save()
+    run.keep_sim()
+    return True
 
 
 def confirm(run: Run, step: str, by: str, value: str | None, fail: str | None) -> Run:

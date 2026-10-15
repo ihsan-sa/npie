@@ -192,6 +192,15 @@ passed, 1 a step failed or the run is waiting on a person (the payload's
 `status` says which), 2 error or refusal (the run is `aborted` when an
 instrument call failed mid-run).
 
+One process drives a run at a time: `start`, `confirm` and `resume` hold the
+run directory's `run.lock` until they return, and a `confirm` or `resume` on
+a run another process holds is refused, naming its pid, so two processes
+never drive one bench. The OS lets go of the lock when a process dies, so a
+run still `running` that a `confirm` or `resume` can claim was left by a
+process that died with no say (SIGKILL, out of memory, its host went down).
+That call aborts it, supply off, report written, rather than carry on from a
+step whose outcome nobody knows.
+
 Safety in the runner, independent of the procedure: whenever a run ends
 (passed, on any failed step and on any error) it turns the supply outputs
 off, then any pwm or awg outputs the run drove, before it stops, and records
