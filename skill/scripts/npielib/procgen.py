@@ -51,6 +51,7 @@ Every limit is derived from a design fact and says which one in the step's
 """
 from __future__ import annotations
 
+import math
 import re
 from datetime import datetime, timezone
 
@@ -927,7 +928,8 @@ def _apply_overrides(stages: list[dict], overrides: dict) -> list[dict]:
 
     Only `expect` fields are overridden, and each one is recorded (step, the
     generated value, the new one) so the report shows what a person changed.
-    A step id the procedure does not have is an error, not a silent no-op.
+    A step id the procedure does not have is an error, not a silent no-op, and
+    so is an override the runner could not hold the step to (_override_error).
     """
     by_id = {s["id"]: s for st in stages for s in st["steps"]}
     unknown = sorted(set(overrides) - set(by_id))
@@ -939,7 +941,36 @@ def _apply_overrides(stages: list[dict], overrides: dict) -> list[dict]:
         s = by_id[sid]
         if "expect" not in s:
             raise DesignError(f"bringup/overrides.yaml: step {sid} has no limits to override")
+        why = _override_error(s["expect"], fields)
+        if why:
+            raise DesignError(f"bringup/overrides.yaml: step {sid}: {why}")
         applied.append({"step": sid, "generated": dict(s["expect"]), "override": dict(fields)})
         s["expect"].update(fields)
         s["derived_from"] = s.get("derived_from", "") + " (overridden in bringup/overrides.yaml)"
     return applied
+
+
+def _override_error(expect: dict, fields: dict) -> str | None:
+    """Why a person's override of `expect` is not a limit the runner can
+    hold a step to, or None. Each key must be one the runner checks for this
+    kind of limit (a misspelt `mx` would leave the generated max in force
+    while the report shows the override), each value a number (null would
+    drop the bound, "5.2 V" would abort the run mid-step), and the merged
+    limit must still pass some reading."""
+    if not fields:
+        return "empty: name the bound(s) to change"
+    keys = {"edges_min"} if "edges_min" in expect else {"min", "max", "nominal"}
+    bad = sorted(set(fields) - keys, key=str)
+    if bad:
+        return (f"{', '.join(map(str, bad))} is not a bound of this limit "
+                f"(one of {', '.join(sorted(keys))})")
+    for k, v in fields.items():
+        if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v):
+            return f"{k}: {v!r} is not a number"
+    e = {**expect, **fields}
+    lo, hi, nom = e.get("min"), e.get("max"), e.get("nominal")
+    if lo is not None and hi is not None and lo > hi:
+        return f"min {lo} is above max {hi}"
+    if nom is not None and ((lo is not None and nom < lo) or (hi is not None and nom > hi)):
+        return f"nominal {nom} is outside min {lo} .. max {hi}"
+    return None
