@@ -162,6 +162,29 @@ def test_no_loose_number_in_procgen():
                        "derived_from:\n" + "\n".join(found))
 
 
+def test_every_source_names_its_entry(workspaces):
+    """`constraints power[]` names a list, not the entry a limit came from
+    (GOALS.md, Every design source names its entry)."""
+    bare = []
+    for ws in workspaces:
+        proc = procgen.generate(design.load(ws))
+        for s in (s for st in proc["stages"] for s in st["steps"]):
+            if "[]" in (s.get("derived_from") or ""):
+                bare.append(f"{ws.parent.name} {s['id']} {s.get('text')!r}: {s['derived_from']!r}")
+    assert not bare, "sources that name a list but not its entry:\n" + "\n".join(bare)
+
+
+def test_the_first_current_limit_names_its_rail(workspaces):
+    proc = procgen.generate(design.load(workspaces[0]))
+    steps = [s for st in proc["stages"] for s in st["steps"]]
+    supply = next(s for s in steps if s.get("role") == "psu" and s.get("set")
+                  and s.get("derived_from"))
+    idle = next(s for s in steps if s.get("text") == "idle input current")
+    for s in (supply, idle):
+        assert "constraints power[+5V]" in s["derived_from"], s["derived_from"]
+        assert "the heaviest rail" in s["derived_from"]
+
+
 def test_every_constant_that_moves_a_limit_is_named(workspaces, monkeypatch):
     base = [_limits(ws) for ws in workspaces]
     found: set[tuple[str, str]] = set()

@@ -36,7 +36,7 @@ from npielib import design, procgen  # noqa: E402
 
 DESIGN_INPUT_RE = re.compile(
     r"\bmanifest [a-z_]+(\.[a-z_]+|\[[^\]]+\])"
-    r"|\bconstraints [a-z_]+\["
+    r"|\bconstraints [a-z_]+\[[^\]]+\]"
     r"|\brequirements VIN\b"
     r"|\bnetlist [A-Z+/][\w+/*-]*"
     r"|\bBOM [A-Z]+\d")
