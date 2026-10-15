@@ -189,7 +189,10 @@ that appeared or vanished included) differ from the ones it was generated
 from, then copies procedure.json into the run directory; the run executes
 that snapshot and refuses to go on if it is edited. Only the step the run
 waits on can be confirmed. `--by` is required and recorded with the time:
-the record says who confirmed each human step. A `--fail` confirmation fails
+the record says who confirmed each human step. `sim` is what a simulated
+run records for itself, so a live run refuses `--by sim`; a `--value` that
+isn't a finite number (`nan`, `inf`) is refused too, with nothing recorded,
+so the person answers again. A `--fail` confirmation fails
 that step, turns the supply off and ends the run at once. Exit codes: 0 run
 passed, 1 a step failed or the run is waiting on a person (the payload's
 `status` says which), 2 error or refusal (the run is `aborted` when an

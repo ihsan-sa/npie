@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import pickle
 import time
@@ -536,6 +537,9 @@ def confirm(run: Run, step: str, by: str, value: str | None, fail: str | None) -
         raise RunError(f"the run is waiting on {run.rec['cursor']}, not {step}")
     if not by.strip():
         raise RunError("--by must name who confirmed")
+    if not run.sim and by.strip().lower() == "sim":     # the record would read as a simulated run's
+        raise RunError("--by sim is what a simulated run records; on a live run name the "
+                       "person who did the step")
     if _abort_if_stale(run):     # the step's text and limit may no longer be the design's
         run.save()
         run.keep_sim()
@@ -551,6 +555,8 @@ def confirm(run: Run, step: str, by: str, value: str | None, fail: str | None) -
                 num = float(value)
             except ValueError as exc:
                 raise RunError(f"--value {value!r} is not a number") from exc
+            if not math.isfinite(num):     # a typo, not a reading; and NaN isn't JSON
+                raise RunError(f"--value {value!r} is not a finite number")
             rec.update(value=num, unit=s["expect"].get("unit", ""))
             verdict = "pass" if within(num, s["expect"]) else "fail"
         elif value is not None:

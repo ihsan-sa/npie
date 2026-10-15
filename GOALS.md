@@ -79,6 +79,7 @@ What has landed, from the git history (a line per PR). A proposed goal that clos
 - [#85](https://github.com/ihsan-sa/npie/pull/85) Hold each live instrument host-wide so two runs can't share it
 - [#87](https://github.com/ihsan-sa/npie/pull/87) Abort a resumed run whose supply isn't as the run left it
 - [#89](https://github.com/ihsan-sa/npie/pull/89) Abort a resumed run whose pwm or awg isn't as the run left it
+- [#91](https://github.com/ihsan-sa/npie/pull/91) Announce unsafe test hooks and the limits stage's D0 switching
 
 ### Every limit names its design input
 
@@ -274,4 +275,11 @@ What has landed, from the git history (a line per PR). A proposed goal that clos
 - **Serves:** Safe anywhere
 - **Done when:** `make check VENV=/home/dispatch-w-npie/venvs/npie` passes with `tests/test_npie_announce.py` generating every fixture variant of `tests/test_npie_rated_input.py`, plus a manifest whose test hook sends a `safe: false` command and one whose hook sends a command the manifest doesn't list, and finding every console step that sends a command not marked `safe: true`, every supply step that turns the output on from off and every step of the motor stage preceded by a human step in its own stage; each unsafe hook directly preceded by a human step naming what it sends; the fixture's `safe: true` selftest still unattended; and the boost's limits stage announcing the D0 it switches at for the under-voltage trip.
 - **Status:** done
-- **Pull requests:** the PR from `dispatch/90` (SKILL.md's rule 3 says every `safe: false` command, the first power-up and the motor stage are preceded by a human step, and no test held procgen to it. procgen wrote `safe:false` into `derived_from` by name but never read the manifest's flag. On a boost, the limits stage sent `duty D0` to switch the bridge for the under-voltage trip with no human step anywhere in that stage, and a manifest `test_hooks` entry ran unattended whatever it sent. Each now gets a human step saying what is about to happen. With the procgen change stashed, 8 of the 21 new tests fail).
+- **Pull requests:** [#91](https://github.com/ihsan-sa/npie/pull/91) (SKILL.md's rule 3 says every `safe: false` command, the first power-up and the motor stage are preceded by a human step, and no test held procgen to it. procgen wrote `safe:false` into `derived_from` by name but never read the manifest's flag. On a boost, the limits stage sent `duty D0` to switch the bridge for the under-voltage trip with no human step anywhere in that stage, and a manifest `test_hooks` entry ran unattended whatever it sent. Each now gets a human step saying what is about to happen. With the procgen change stashed, 8 of the 21 new tests fail).
+
+### Every live confirmation names a person and a reading
+
+- **Serves:** Safe anywhere
+- **Done when:** `make check VENV=/home/dispatch-w-npie/venvs/npie` passes with `tests/test_npie_confirm.py` finding, on a live run (fake SCPI supply) waiting on a person after the supply went on, `confirm --by sim` (any case, padded) refused with run.json unchanged, `npie_run.py confirm --by sim` exiting 2 and the same step then confirmed by a named person; and, on a held dry run of the EVN-header board at a typed reading, `--value` `nan`, `inf`, `-inf` and `1e999` refused with run.json unchanged, a finite reading then passing, and every person's step recorded with the name given.
+- **Status:** done
+- **Pull requests:** the PR from `dispatch/92` (SKILL.md's rule 2 says a human step is answered by a named person and a simulated run records its confirmations as `sim`. `confirm` took any non-blank `--by`, so a live run's step, the first power-up or the motor stage perhaps, could be confirmed `--by sim`, and the report then read as if nobody had done it. A typed `nan` was taken as a reading: it failed the run on a typo and went into run.json as `NaN`, which isn't JSON, and `inf` would pass any one-sided limit. `runner.confirm` now refuses both with nothing recorded, so the person answers again. With the runner change stashed, 9 of the 10 new tests fail).
