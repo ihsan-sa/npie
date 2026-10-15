@@ -67,6 +67,7 @@ What has landed, from the git history (a line per PR). A proposed goal that clos
 - [#60](https://github.com/ihsan-sa/npie/pull/60) Name the rail behind each current limit, not constraints power[]
 - [#62](https://github.com/ihsan-sa/npie/pull/62) Close the PDF-on-any-host goal; update docs and run notes
 - [#64](https://github.com/ihsan-sa/npie/pull/64) Hold every supply setpoint to the input's rated voltage
+- [#67](https://github.com/ihsan-sa/npie/pull/67) Write the report PDF for a run waiting on a person too
 
 ### Every limit names its design input
 
@@ -178,4 +179,11 @@ What has landed, from the git history (a line per PR). A proposed goal that clos
 - **Serves:** Every run on record
 - **Done when:** `make check VENV=/home/dispatch-w-npie/venvs/npie` passes with `tests/test_npie_run_report.py` holding a dry run on a person (`--hold`) and finding, after `start` and after a `confirm` that leaves it waiting, a `report.pdf` starting `%PDF-` whose report names the run as not ended and says what it waits on: the person and the step (with its text) after `start`, a `resume` from the confirmed step after `confirm`.
 - **Status:** done
-- **Pull requests:** the PR from `dispatch/66` (`npie_run.py` built the PDF only once a run ended, so a run left waiting on a person, which on a real bench can be days or for good, had only `report.tex` and no PDF. Now every `start`, `confirm` and `resume` writes the PDF, and a waiting run's first page says it has not ended and names the step, with its text, that waits on a person, or the `resume` it needs after a confirmation. Before this, the callout said only "It stopped at <step>").
+- **Pull requests:** [#67](https://github.com/ihsan-sa/npie/pull/67) (`npie_run.py` built the PDF only once a run ended, so a run left waiting on a person, which on a real bench can be days or for good, had only `report.tex` and no PDF. Now every `start`, `confirm` and `resume` writes the PDF, and a waiting run's first page says it has not ended and names the step, with its text, that waits on a person, or the `resume` it needs after a confirmation. Before this, the callout said only "It stopped at <step>").
+
+### Every way requirements write the VIN range is read
+
+- **Serves:** Limits from the design
+- **Done when:** `make check VENV=/home/dispatch-w-npie/venvs/npie` passes with `tests/test_npie_requirements_range.py` finding `design._vin_range` read 8-24 V from each wording in its `READ` list (an ASCII hyphen, an en or em dash, `to`, `..`, a unit on both numbers, `VDC`, and `Operating input: 8-24 V`), no range from each line in `NOT_A_RANGE` (no "operating", not volts, not on one line), and, on the fixture with `Input 8–24 V operating range.`, neither VIN corner skipped and the supply set to 8 V and 24 V by steps that say `requirements VIN min 8 V` and `requirements VIN max 24 V`.
+- **Status:** done
+- **Pull requests:** the PR from `dispatch/68` (requirements.md is prose a person writes, and the range regex took only `A-B V operating` with an ASCII hyphen. An en dash, which editors put in for you, or `8 V to 24 V`, `VDC`, or `Operating input: 8-24 V` gave no range, with no warning: the first power fell back to half the input's rating (`VIN_NO_RANGE_FRAC`) and both VIN corners were skipped as "no operating range", on a board whose design gives one).

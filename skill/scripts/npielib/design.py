@@ -144,16 +144,24 @@ def _refkey(ref: str):
     return (m.group(1), int(m.group(2))) if m else (ref, 0)
 
 
+_NUM = r"(\d+(?:\.\d+)?)"
+_SPAN = (_NUM + r"\s*(?:V(?:\s*DC)?\s*)?(?:-|‐|‑|‒|–|—|~|\.\.|to)\s*"
+         + _NUM + r"\s*V(?:\s*DC)?")
 _RANGE_RE = re.compile(
-    r"(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)\s*V\s+operating", re.IGNORECASE)
+    _SPAN + r"\s+operating" + "|" + r"operating[^\n\d]{0,40}?" + _SPAN + r"\b", re.IGNORECASE)
 
 
 def _vin_range(req: Path) -> tuple | None:
-    """The first 'A-B V operating' in requirements.md, e.g. '10-28 V operating'."""
+    """The first operating range in volts in requirements.md: 'A-B V operating'
+    ('10-28 V operating', '10 V to 28 VDC operating', a dash of any width) or
+    'operating ... A-B V' on one line ('Operating input range: 10-28 V')."""
     if not req.is_file():
         return None
     m = _RANGE_RE.search(req.read_text(encoding="utf-8", errors="replace"))
-    return (float(m.group(1)), float(m.group(2))) if m else None
+    if not m:
+        return None
+    lo, hi = (m.group(1), m.group(2)) if m.group(1) else (m.group(3), m.group(4))
+    return float(lo), float(hi)
 
 
 def load(ws: str | Path) -> Design:
