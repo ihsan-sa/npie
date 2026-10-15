@@ -212,7 +212,12 @@ workspace whose bench.yaml names the same supply, is refused that
 instrument, naming the holder's pid, and aborts without writing to it, its
 end-of-run off included, so its `safe_state` says "supply not confirmed
 off". The lock is held only while a process runs: a run waiting on a person
-holds nothing.
+holds nothing, so another run, or someone at the front panel, can change its
+supply in the gap. `resume` therefore reads the supply back (`VOLT?`,
+`CURR?`, `OUTP?`) before it goes on and, if the output, or with the output
+on the voltage or current limit (to 10 mV and 10 mA), isn't what the run's
+last supply step set, aborts the run, supply off, naming both settings. The
+pwm and awg outputs aren't checked this way yet.
 
 Safety in the runner, independent of the procedure: whenever a run ends
 (passed, on any failed step and on any error) it turns the supply outputs

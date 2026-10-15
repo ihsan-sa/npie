@@ -12,7 +12,8 @@ The engine never waits on a person: a human step ends the invocation with
 status awaiting_human, `confirm` records the answer and `advance` carries on.
 A run that ends, passed, failed or aborted, turns the supply outputs off,
 then any pwm or awg outputs the run drove, before it stops (reference/design.md
-section 3).
+section 3). A run resumed from a person reads the supply back first and
+aborts if it isn't as the run's last supply step left it.
 """
 from __future__ import annotations
 
@@ -96,6 +97,31 @@ def _abort_if_stale(run: "Run") -> bool:
                         "and start a new run")
     run.finish("aborted", "design changed")
     return True
+
+
+def _supply_moved(run: "Run") -> str | None:
+    """How the supply differs from what the run's last supply step left it
+    at, or None. A run waiting on a person holds no instrument, so another
+    run, or a person at the front panel, may have set or turned off its
+    supply in the gap; carrying on would test the board at a setpoint the
+    procedure never asked for."""
+    done = {r["id"]: r for r in run.rec["steps"]}
+    left = next((s for s in reversed(run.steps[:run.index(run.rec["cursor"])])
+                 if s["type"] == "supply" and s["id"] in done), None)
+    if left is None:      # the run hasn't touched the supply yet
+        return None
+    want, got = left["set"], run.bench.role("psu").state()
+    same = bool(got["output"]) == bool(want["output"])
+    if same and want["output"]:   # with the output off, the next supply step sets it
+        same = (abs(float(got["v"]) - float(want["v"])) <= instruments.PSU_READBACK_V
+                and abs(float(got["i_limit"]) - float(want["i_limit"]))
+                <= instruments.PSU_READBACK_A)
+    if same:
+        return None
+
+    def shown(st):
+        return f"{float(st['v']):g} V, {float(st['i_limit']):g} A, output {'on' if st['output'] else 'off'}"
+    return f"the supply reads {shown(got)}, not {shown(want)} as {left['id']} left it"
 
 
 def within(value, e: dict) -> bool:
@@ -384,11 +410,18 @@ def advance(run: Run) -> Run:
     if run.rec["status"] not in ("running", "awaiting_human"):
         raise RunError(f"run is {run.rec['status']}; start a new one")
     auto = run.sim and not run.rec.get("hold")
+    resumed = run.rec["status"] == "awaiting_human"
     run.rec["status"] = "running"
     try:
         if run.bench is None:     # inside the try: a bench that can't be built aborts the run
             run.open_bench()
         if _abort_if_stale(run):
+            return run
+        moved = _supply_moved(run) if resumed else None
+        if moved:
+            run.rec["error"] = (f"{run.rec['cursor']}: {moved} (changed while the run "
+                                "waited on a person); start a new run")
+            run.finish("aborted", "supply changed")
             return run
         for s in run.steps[run.index(run.rec["cursor"]):]:
             run.rec["cursor"] = s["id"]
