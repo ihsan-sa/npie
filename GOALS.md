@@ -51,6 +51,7 @@ What has landed, from the git history (a line per PR). A proposed goal that clos
 - [#42](https://github.com/ihsan-sa/npie/pull/42) Check the bench host at every hardware door, not just Bench
 - [#44](https://github.com/ihsan-sa/npie/pull/44) Abort and report a run on Ctrl-C or a bench that won't build
 - [#46](https://github.com/ihsan-sa/npie/pull/46) Abort and report a run on SIGTERM or SIGHUP, not just Ctrl-C
+- [#48](https://github.com/ihsan-sa/npie/pull/48) Name every number in a procgen limit so the nudge reaches it
 
 ### Every limit names its design input
 
@@ -106,4 +107,11 @@ What has landed, from the git history (a line per PR). A proposed goal that clos
 - **Serves:** Limits from the design
 - **Done when:** `make check VENV=/home/dispatch-w-npie/venvs/npie` passes with `tests/test_npie_limit_fields.py` reading procgen's source and finding no number other than 0 and 1 (and `round()`'s digits) inside a dict literal with a `nominal`, `min`, `max` or `edges_min` key, so the nudge in the same file reaches every number in a limit, with its `UNDISCLOSED` list still empty.
 - **Status:** done
-- **Pull requests:** the PR from `dispatch/47` (the limit-field goal nudged only module constants, and it said so. These numbers were written inline in limits: the 90 % current ceiling (four steps), the -5 %/+1 % of a rail following the input, the +/-5 % firmware vbus reading, the +/-3 % sense-amp offset, the 0.5 +/-0.05 bridge duty, the +/-2 % PWM frequency (two steps), the dead time's +1 ns round-up, the diode's 0.5 V nominal and the Hall check's 2 edges. The last two weren't written in `derived_from` at all. Each is now a constant, `derived_from` prints its value, and the nudge finds every one disclosed).
+- **Pull requests:** [#48](https://github.com/ihsan-sa/npie/pull/48) (the limit-field goal nudged only module constants, and it said so. These numbers were written inline in limits: the 90 % current ceiling (four steps), the -5 %/+1 % of a rail following the input, the +/-5 % firmware vbus reading, the +/-3 % sense-amp offset, the 0.5 +/-0.05 bridge duty, the +/-2 % PWM frequency (two steps), the dead time's +1 ns round-up, the diode's 0.5 V nominal and the Hall check's 2 edges. The last two weren't written in `derived_from` at all. Each is now a constant, `derived_from` prints its value, and the nudge finds every one disclosed).
+
+### Every limit constant is reached by a fixture
+
+- **Serves:** Limits from the design
+- **Done when:** `make check VENV=/home/dispatch-w-npie/venvs/npie` passes with `tests/test_npie_limit_fields.py` finding every numeric procgen constant it nudges move some step's `expect` or `fields` in some fixture variant, except those in its `NOT_A_LIMIT` list, which it holds to moving none, and with its `UNREACHED` list empty.
+- **Status:** done
+- **Pull requests:** the PR from `dispatch/49` (the nudge checked only that some constant moved some limit, so a constant no fixture reaches passed unseen, and twelve did. Four set no limit at all (a console duty, a wait, a person's injection wiring) and are now `NOT_A_LIMIT`. Four new fixture variants reach the other eight, and each moves a limit whose `derived_from` names it. `hall` reaches the Hall edge count. `defaults` (no `bringup{}`) reaches the short floors and the spin current. `rails` (a rail rated like the input, a catch diode to +5V, a light enough load that the first current limit isn't clamped) reaches `FOLLOW_TOL`, `TOL_ASYNC` and `EFFICIENCY`. `boost-out` (Q1's drain on its own `/VOUT`) reaches `BOOST_IDLE_DROP_V`. `rails` and `boost-out` also pass the limit-trace check).

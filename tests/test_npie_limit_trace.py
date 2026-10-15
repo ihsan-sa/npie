@@ -93,8 +93,61 @@ def _boost(ws: Path) -> None:
     mf.write_text(json.dumps(m))
 
 
-@pytest.mark.parametrize("variant", [_mini_bldc, _no_manifest, _evn_header, _spin, _boost],
-                         ids=["mini-bldc", "no-manifest", "evn-header", "spin", "boost"])
+def _hall(ws: Path) -> None:
+    """Hall sensor nets on U1, so procgen emits the logic analyser step."""
+    net = ws / "kicad" / "mini-bldc.net"
+    hall = "".join(f'    (net (code "{900 + i}") (name "/HALL_{c}")\n'
+                   f'      (node (ref "U1") (pin "{20 + i}") (pintype "input")))\n'
+                   for i, c in enumerate("ABC"))
+    net.write_text(re.sub(r"(\(nets\s*\n)", lambda m: m.group(1) + hall, net.read_text(), count=1))
+
+
+def _rails(ws: Path) -> None:
+    """The rails stage's other branches: /VM_PROT rated like the input (a rail
+    that follows it), a D2 catch diode from the buck's SW node to +5V (a
+    catch-diode converter), and a +5V load light enough that the first
+    current limit is not clamped to FIRST_ILIMIT_A."""
+    net = ws / "kicad" / "mini-bldc.net"
+    s = net.read_text()
+    s = s.replace('    (comp (ref "D1")',
+                  '    (comp (ref "D2") (value "SS34") (footprint "X"))\n    (comp (ref "D1")', 1)
+    s = re.sub(r'(\(name "/regulators/BUCK_SW"\)\n)',
+               lambda m: m.group(1) + '      (node (ref "D2") (pin "2") (pintype "passive"))\n', s)
+    s = re.sub(r'(\(name "\+5V"\)\n)',
+               lambda m: m.group(1) + '      (node (ref "D2") (pin "1") (pintype "passive"))\n', s)
+    s = re.sub(r"(\(nets\s*\n)", lambda m: m.group(1) + (
+        '    (net (code "950") (name "/VM_PROT")\n'
+        '      (node (ref "U2") (pin "3") (pintype "power_in")))\n'), s, count=1)
+    net.write_text(s)
+    cp = ws / "kicad" / "constraints.json"
+    c = json.loads(cp.read_text())
+    c["voltages"].append({"net": "/VM_PROT", "voltage": 30})
+    for p in c["power"]:
+        if p["net"] == "+5V":
+            p["current_a"] = 0.1
+    cp.write_text(json.dumps(c))
+
+
+def _boost_out(ws: Path) -> None:
+    """The boost with Q1's drain on its own /VOUT, not the input, so the boost
+    output is a rail the rails stage measures at idle."""
+    _boost(ws)
+    net = ws / "kicad" / "mini-bldc.net"
+    drain = '      (node (ref "Q1") (pin "5") (pinfunction "D_5") (pintype "passive"))\n'
+    s = net.read_text().replace(drain, "", 1)
+    s = re.sub(r"(\(nets\s*\n)", lambda m: m.group(1) + (
+        f'    (net (code "951") (name "/VOUT")\n{drain}    )\n'), s, count=1)
+    net.write_text(s)
+    cp = ws / "kicad" / "constraints.json"
+    c = json.loads(cp.read_text())
+    c["voltages"].append({"net": "/VOUT", "voltage": 30})
+    cp.write_text(json.dumps(c))
+
+
+@pytest.mark.parametrize("variant", [_mini_bldc, _no_manifest, _evn_header, _spin, _boost,
+                                     _rails, _boost_out],
+                         ids=["mini-bldc", "no-manifest", "evn-header", "spin", "boost",
+                              "rails", "boost-out"])
 def test_every_limit_names_its_design_input(tmp_path, variant):
     ws = tmp_path / "mini-bldc"
     shutil.copytree(FIX, ws)

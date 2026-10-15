@@ -10,6 +10,11 @@ moved must have its `derived_from` move with it, so the constant's value is
 written where a reviewer reads the limit. UNDISCLOSED lists the
 (constant, step text) pairs that don't yet, and is to be emptied.
 
+A constant no variant's limit moves with passes that unseen (GOALS.md, Every
+limit constant is reached by a fixture), so each must move some limit,
+unless it sets no limit at all (NOT_A_LIMIT, held to moving none). UNREACHED
+lists any a new constant leaves without a variant, and is to stay empty.
+
 Only module constants are nudged, so a number written inline in a limit (say
 `round(v * 0.95, 3)`) would slip past. test_no_inline_number_in_a_limit reads
 procgen's source and fails on any number other than 0 and 1 (and round()'s
@@ -31,14 +36,29 @@ if str(NPIE) not in sys.path:
     sys.path.insert(0, str(NPIE))
 
 from npielib import design, instruments, procgen  # noqa: E402
-from test_npie_limit_trace import (FIX, _boost, _evn_header, _mini_bldc,  # noqa: E402
-                                   _no_manifest, _spin)
+from test_npie_limit_trace import (FIX, _boost, _boost_out, _bringup, _evn_header,  # noqa: E402
+                                   _hall, _mini_bldc, _no_manifest, _rails, _spin)
 
-VARIANTS = [_mini_bldc, _no_manifest, _evn_header, _spin, _boost]
+
+def _defaults(ws: Path) -> None:
+    """No constraints bringup{}, so the short floors and the spin current fall
+    back to procgen's constants."""
+    _spin(ws)
+    _bringup(ws, None)
+
+
+VARIANTS = [_mini_bldc, _no_manifest, _evn_header, _spin, _boost, _hall, _defaults,
+            _rails, _boost_out]
 NUDGE = 1.37
 # (constant, step text) where the constant moves the limit and derived_from
 # doesn't say so
 UNDISCLOSED: set[tuple[str, str]] = set()
+# constants that shape no expect or fields (a console duty, a wait, a person's
+# instructions); the check holds them to moving no limit
+NOT_A_LIMIT = {"OVP_OVERSHOOT", "INJECT_R_OHM", "INJECT_ILIM_A", "TRIP_SETTLE_S"}
+# limit constants no fixture variant reaches yet, so nothing shows the limit
+# names them; add a variant that reaches one rather than listing it
+UNREACHED: set[str] = set()
 
 
 def _constants() -> list[str]:
@@ -133,6 +153,12 @@ def test_every_constant_that_moves_a_limit_is_named(workspaces, monkeypatch):
                         if d0 == d1:
                             found.add((name, key[1]))
     assert moved_any, "the nudge moved no limit: the check is checking nothing"
+    unreached = sorted(set(_constants()) - moved_any - UNREACHED - NOT_A_LIMIT)
+    assert not unreached, ("constants no fixture variant's limit moves with, so "
+                           "nothing shows they are named:\n" + "\n".join(unreached))
+    reached = sorted(moved_any & (UNREACHED | NOT_A_LIMIT))
+    assert not reached, ("UNREACHED or NOT_A_LIMIT entries that now move a limit, "
+                         "drop them:\n" + "\n".join(reached))
     new = sorted(found - UNDISCLOSED)
     stale = sorted(UNDISCLOSED - found)
     assert not new, ("constants that move a limit its derived_from doesn't name:\n"

@@ -37,22 +37,13 @@ if str(NPIE) not in sys.path:
 
 import procedure_gen  # noqa: E402
 from npielib import design, instruments, procgen, runner  # noqa: E402
-from test_npie_limit_trace import (FIX, _boost, _evn_header, _mini_bldc,  # noqa: E402
-                                   _no_manifest, _spin)
+from test_npie_limit_trace import (FIX, _boost, _evn_header, _hall,  # noqa: E402
+                                   _mini_bldc, _no_manifest, _spin)
 from test_npie_rf_instruments import _rf_stage  # noqa: E402
 
 
 def _rf(ws: Path) -> None:
     pass        # the stage is added to the generated procedure, in _procedure
-
-
-def _hall(ws: Path) -> None:
-    """Hall sensor nets on U1, so procgen emits the logic analyser step."""
-    net = ws / "kicad" / "mini-bldc.net"
-    hall = "".join(f'    (net (code "{900 + i}") (name "/HALL_{c}")\n'
-                   f'      (node (ref "U1") (pin "{20 + i}") (pintype "input")))\n'
-                   for i, c in enumerate("ABC"))
-    net.write_text(re.sub(r"(\(nets\s*\n)", lambda m: m.group(1) + hall, net.read_text(), count=1))
 
 
 VARIANTS = [_mini_bldc, _no_manifest, _evn_header, _spin, _boost, _rf, _hall]
