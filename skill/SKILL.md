@@ -22,7 +22,7 @@ written by you: when a limit looks wrong, fix the rule (or the board's
 | a person answers a human step | `npie_run.py confirm --run <dir> --step <id> --by <name> [--value V] [--fail "why"]`, then `resume` |
 | "where is the run", "what is it waiting on" | `npie_run.py status --run <dir>` |
 | "this limit is wrong" | a person adds `<step id>: {min: .., max: ..}` to `bringup/overrides.yaml`, then regenerate |
-| "report", "write up the run" | `scripts/npie_report.py --run <dir>` -> `report.pdf` |
+| "report", "write up the run" | `npie_run.py` already wrote it when the run stopped (its JSON's `report`); `scripts/npie_report.py --run <dir>` -> `report.pdf` rebuilds it, or builds one for a run still waiting on a person |
 
 Every script follows the repo contract: argparse, JSON on stdout, exit 0
 pass / 1 a failed step or a run waiting on a person / 2 error, never

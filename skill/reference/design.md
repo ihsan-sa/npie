@@ -263,6 +263,14 @@ from `NPIE_LUALATEX` else PATH and the style from `NPIE_HOUSE_STYLE` else
 pdf-material-builder's skill dir; without either (or `--tex-only`) the
 script writes `report.tex` only and exits 1.
 
+`npie_run.py` calls the same builder whenever `start`, `confirm` or `resume`
+leaves a run, so no run goes unrecorded for want of someone asking: the
+`.tex` every time, the PDF once the run has ended (passed, failed or
+aborted), and its JSON says under `report` where they are or why there is no
+PDF. A run waiting on a person gets its PDF when it ends, or from
+`npie_report.py --run R` before then. A report that fails to build is a
+warning, never the run's outcome.
+
 `shopping.py` reads the procedure, not the design: each instrument role the
 steps use, with the least spec those steps ask of it (supply volts, and amps
 with 20 % headroom, meter functions, scope bandwidth 10x the fastest

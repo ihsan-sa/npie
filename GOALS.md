@@ -44,6 +44,7 @@ What has landed, from the git history (a line per PR). A proposed goal that clos
 - [#18](https://github.com/ihsan-sa/npie/pull/18) Add --help smoke tests for every skill script
 - [#28](https://github.com/ihsan-sa/npie/pull/28) Check every generated limit names its design input
 - [#30](https://github.com/ihsan-sa/npie/pull/30) Record the boost trace step in GOALS.md and run notes
+- [#34](https://github.com/ihsan-sa/npie/pull/34) Close the limit-trace goal in GOALS.md and add run notes
 
 ### Every limit names its design input
 
@@ -51,3 +52,10 @@ What has landed, from the git history (a line per PR). A proposed goal that clos
 - **Done when:** `make check` passes with `tests/test_npie_limit_trace.py` generating, from fixture boards only (no boards repo), every stage procgen emits, `power-stage` for a boost included, and finding no step with `expect` or `fields` whose `derived_from` does not point into a design input (a field of the netlist, constraints, BOM, requirements or manifest, such as `manifest commands[duty]` or `constraints voltages[+3V3]`), and the test's `RULE_ONLY` list of limits that are procgen constants (today the short-check floors and the spin current) is empty.
 - **Status:** done
 - **Pull requests:** [#28](https://github.com/ihsan-sa/npie/pull/28) (the check on the mini-bldc fixture and its variants; seven untraced `derived_from` wordings fixed, plus five on paths no fixture reaches yet); [#30](https://github.com/ihsan-sa/npie/pull/30) (a boost variant of mini-bldc, so the check covers every `power-stage` step and both kinds of trip, all already traced); the PR from `dispatch/33` (the short-check floors and the spin current read from an optional constraints `bringup{}` block, which the fixture carries; without it procgen falls back to its constants and says `procgen default`; `RULE_ONLY` emptied).
+
+### Every run writes its own report
+
+- **Serves:** Every run on record
+- **Done when:** `make check VENV=/home/dispatch-w-npie/venvs/npie` passes with `tests/test_npie_run_report.py` dry-running `npie_run.py` to each way a run stops (passed, failed, aborted, waiting on a person, and failed by a person's confirmation), and finding in each run dir a `report.tex` that names the run's status and a `report` entry in the JSON that gives the PDF, or says why there is none (lualatex missing, or the run not ended yet); on a host with lualatex the ended runs must have `report.pdf`.
+- **Status:** done
+- **Pull requests:** the PR from `dispatch/35` (`npie_run.py` calls `npie_report.write()` whenever start, confirm or resume leaves a run: the `.tex` every time, the PDF once the run ends; a report error is a warning and never the run's outcome. Before this, a run left only `run.json` until someone ran `npie_report.py`, and the report tests covered only passed and failed runs).
