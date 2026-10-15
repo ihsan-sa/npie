@@ -159,20 +159,25 @@ def _fallbacks(ws: Path) -> None:
     operating range in requirements.md (the setpoint is half the input rating),
     a load light enough that the first current limit sits on ILIM_FLOOR_A, and
     a boost with no pwm.max_duty whose over-voltage level asks for more duty
-    than DUTY_MAX_DEFAULT."""
-    _boost(ws)
+    than DUTY_MAX_DEFAULT. The boost drives its own /VOUT, rated above its
+    over-voltage trip, so D0 asks for no output past either."""
+    _boost_out(ws)
     cp = ws / "kicad" / "constraints.json"
     c = json.loads(cp.read_text())
     c["blocks"].append({k: v for k, v in EVN_BLOCK.items() if k != "operating_point"})
     for p in c["power"]:
         if p["net"] in ("+5V", "+3V3"):
             p["current_a"] = 0.001
+    for v in c["voltages"]:
+        if v["net"] == "/VOUT":
+            v["voltage"] = 400
     cp.write_text(json.dumps(c))
     (ws / "requirements.md").write_text("# mini\n")
     mf = ws / "firmware" / "fwe-manifest.json"
     m = json.loads(mf.read_text())
     del m["pwm"]["max_duty"]
     m["safety"]["vout_ov_v"] = 400.0
+    next(t for t in m["trips"] if t["name"] == "ovp")["threshold"] = 380.0
     mf.write_text(json.dumps(m))
 
 

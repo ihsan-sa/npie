@@ -34,7 +34,9 @@ Every limit is derived from a design fact and says which one in the step's
   (at most BOOST_IDLE_DROP_V below it). Closed loop (`arm`), the firmware's
   status vout_v sits at safety.vout_target_v +/-5 %. Open loop (`duty`, the
   bridge synchronous, so Vout = Vin/(1-D) at no load), D0 aims at half the
-  output over-voltage level; a meter reads Vout within +/-10 % of
+  lowest of safety.vout_ov_v, each output-voltage trip's threshold and the
+  output net's rating (a D0 past a trip would trip before the switching
+  checks); a meter reads Vout within +/-10 % of
   Vin/(1-D0), and the scope reads pwm.freq_hz +/-2 %, D0 +/-0.03 and the
   dead time from dead_time_ns - DT_SKEW_NS to + DT_SKEW_NS + 1 ns (the
   timer rounds it up). Each manifest trip is provoked while switching at D0
@@ -44,7 +46,8 @@ Every limit is derived from a design fact and says which one in the step's
   injecting on its sense net through INJECT_R_OHM with an INJECT_ILIM_A limit.
 - no supply setpoint goes above the input's rating in constraints voltages[]:
   a first power or a requirements VIN corner above it is listed as skipped,
-  not applied, and with no power-up stage nothing later sets the supply.
+  not applied, and with no power-up stage nothing later sets the supply,
+  flashes the board or talks to its firmware.
 - limits: the under-voltage trip is checked while switching at D0 when the
   firmware has a `pwm` block (it latches input trips only while switching),
   else with the bridge idle.
@@ -480,6 +483,10 @@ class _Builder:
         if not m:
             self.skip("programming", "no firmware/fwe-manifest.json in the workspace")
             return
+        if not hasattr(self, "v_first"):
+            self.skip("programming", "power-up stage was not generated: the probe "
+                                     "flashes a board the supply powers")
+            return
         fl, ua = m.get("flash", {}), m.get("uart", {})
         self.human(f"Connect the SWD probe to {fl.get('connector', 'the SWD header')}; "
                    "the board stays powered from the supply.")
@@ -500,6 +507,9 @@ class _Builder:
 
     def blocks(self):
         self.stage("blocks", "Per-block tests")
+        if not hasattr(self, "v_first"):
+            self.skip("blocks", "power-up stage was not generated")
+            return
         d, m = self.d, self.d.manifest
         g = self.point(self.gnd) if self.gnd else None
         for h in (m or {}).get("test_hooks", []):
@@ -639,27 +649,25 @@ class _Builder:
         saf, pwm = m.get("safety") or {}, m["pwm"]
         vin, g = self.v_first, self.point(self.gnd)
         out = self.point(bst["out"])
-        ov_trip = next((t for t in m.get("trips", []) if t.get("unit") == "V"), None)
-        if saf.get("vout_ov_v"):
-            ov, ov_src = saf["vout_ov_v"], "manifest safety.vout_ov_v"
-        elif ov_trip:
-            ov, ov_src = ov_trip["threshold"], f"manifest trips[{ov_trip['name']}].threshold"
-        else:
-            ov = None
-        if ov is None:
+        level = self._ov_level()
+        if level is None:
             self.skip("power-stage", "manifest gives no output over-voltage level "
                                      "(safety.vout_ov_v), so no safe open-loop duty")
             self.stages.pop()
             return
+        ov, ov_src = level
         d0 = self._open_duty(vin, ov * D0_AIM_FRAC)
         v0 = vin / (1 - d0)
         mx, mx_src = self._max_duty()
         d0_src = (f"D0 = 1 - {vin:g} V / ({D0_AIM_FRAC:g}x {ov:g} V), kept within "
-                  f"{DUTY_MIN:g} and {mx_src} {mx:g}: {D0_AIM_FRAC:g}x the output "
-                  f"over-voltage level ({ov_src}), synchronous boost Vout = Vin/(1-D)")
+                  f"{DUTY_MIN:g} and {mx_src} {mx:g}: {D0_AIM_FRAC:g}x {ov_src}, the lowest "
+                  "of the output's over-voltage level, trips and rating; synchronous "
+                  "boost Vout = Vin/(1-D)")
+        trip_v = [float(t["threshold"]) for t in m.get("trips", []) if self._output_trip(t)]
         self.human(f"Output open: nothing on {bst['out']}'s connectors. The next steps switch "
                    f"{bst['ic']} at {pwm.get('freq_hz', 0) / 1e6:g} MHz from the {vin:g} V "
-                   f"supply; the output reaches {ov:g} V in the over-voltage test. Hands clear.")
+                   "supply" + (f"; the output reaches {max(trip_v):g} V in the over-voltage "
+                               "test" if trip_v else "") + ". Hands clear.")
         target = saf.get("vout_target_v")
         if target and "arm" in cmds:
             self.step("console", role="console", send="arm", expect_re="^OK ", timeout_s=2,
@@ -733,7 +741,7 @@ class _Builder:
             name, thr, unit = t["name"], float(t["threshold"]), t.get("unit", "")
             tsrc = (f"manifest trips[{name}]: {t.get('comparator', '?')} -> "
                     f"{t.get('fault_input', '?')} at {thr:g} {unit}")
-            by_duty = unit == "V" and "OUT" in str(t.get("sense_net", "")).upper()
+            by_duty = self._output_trip(t)
             if by_duty:
                 aim = (min(thr * OVP_OVERSHOOT, OV_AIM_RATING_FRAC * rating) if rating
                        else thr * OVP_OVERSHOOT)
@@ -786,6 +794,32 @@ class _Builder:
                       derived_from=f"manifest trips[{name}].clear, latched "
                                    f"{str(t.get('latched', True)).lower()}",
                       text=f"{name} clears once its comparator has fallen")
+
+    @staticmethod
+    def _output_trip(t: dict) -> bool:
+        """A manifest trip on the output voltage, provoked by an open-loop duty."""
+        return t.get("unit") == "V" and "OUT" in str(t.get("sense_net", "")).upper()
+
+    def _ov_level(self) -> tuple[float, str] | None:
+        """The level the boost's open loop stays well under, and its source:
+        the lowest of the manifest's safety.vout_ov_v, each output-voltage
+        trip's threshold and the output net's rating in constraints voltages[].
+        A D0 above a trip trips, and the switching checks after it read a
+        stopped bridge. None when the manifest gives neither of the first two."""
+        m, out = self.d.manifest or {}, self.boost["out"]
+        levels = [(float(t["threshold"]), f"manifest trips[{t['name']}].threshold "
+                                          f"{float(t['threshold']):g} V")
+                  for t in m.get("trips", []) if self._output_trip(t)]
+        ov = (m.get("safety") or {}).get("vout_ov_v")
+        if ov:
+            levels.append((float(ov), f"manifest safety.vout_ov_v {float(ov):g} V"))
+        if not levels:
+            return None
+        rated = self.d.voltages.get(out)
+        if rated is not None:
+            levels.append((float(rated), f"constraints voltages[{_short(out)}] "
+                                         f"rating {rated:g} V"))
+        return min(levels, key=lambda lv: lv[0])
 
     def _net(self, short: str | None) -> str | None:
         """A manifest net name ('PWM_LO') -> the netlist's ('/PWM_LO')."""
@@ -859,8 +893,8 @@ class _Builder:
             # this firmware latches input trips only while switching
             d0 = None
             if self.boost and "power-stage" in {st["id"] for st in self.stages}:
-                ov = saf.get("vout_ov_v")
-                d0 = self._open_duty(self.v_first, ov * D0_AIM_FRAC) if ov else None
+                level = self._ov_level()
+                d0 = self._open_duty(self.v_first, level[0] * D0_AIM_FRAC) if level else None
             if d0 is not None:
                 self.step("supply", role="psu",
                           set={"v": self.v_first, "i_limit": self.ilim, "output": True},

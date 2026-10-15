@@ -71,6 +71,7 @@ What has landed, from the git history (a line per PR). A proposed goal that clos
 - [#69](https://github.com/ihsan-sa/npie/pull/69) Read the VIN range however requirements.md writes it
 - [#71](https://github.com/ihsan-sa/npie/pull/71) Refuse an override the runner can't hold a step to
 - [#73](https://github.com/ihsan-sa/npie/pull/73) Show every console field's limit in procedure.md
+- [#75](https://github.com/ihsan-sa/npie/pull/75) Turn the supply off when a run passes, not only when it fails
 
 ### Every limit names its design input
 
@@ -210,4 +211,11 @@ What has landed, from the git history (a line per PR). A proposed goal that clos
 - **Serves:** Safe anywhere
 - **Done when:** `make check VENV=/home/dispatch-w-npie/venvs/npie` passes with `tests/test_npie_run_safe_end.py` finding that a board with no operating range in requirements.md gives a procedure whose last supply step leaves the output on, and, dry-running to `passed` every fixture variant of `tests/test_npie_rated_input.py` whose dry run passes plus that board and the RF drive stage of `tests/test_npie_rf_instruments.py`, the simulated supply off with `safe_state` saying so, and the pwm generator and both awg channels the RF run drove off.
 - **Status:** done
-- **Pull requests:** the PR from `dispatch/74` (the runner turned the outputs off only when a run failed or aborted. A passed run left them as its last step did, and procgen's only end-of-run supply-off is in the limits stage, which a board with no operating range skips. So a passed run on such a board, or one after a stage that drives the pwm or awg, left the board powered and driven, on a real bench perhaps with nobody there. `runner.Run.finish` now calls `safe_off` for every ended run. With the runner change stashed, 13 of the 14 new tests fail, all but the one that checks the procedure).
+- **Pull requests:** [#75](https://github.com/ihsan-sa/npie/pull/75) (the runner turned the outputs off only when a run failed or aborted. A passed run left them as its last step did, and procgen's only end-of-run supply-off is in the limits stage, which a board with no operating range skips. So a passed run on such a board, or one after a stage that drives the pwm or awg, left the board powered and driven, on a real bench perhaps with nobody there. `runner.Run.finish` now calls `safe_off` for every ended run. With the runner change stashed, 13 of the 14 new tests fail, all but the one that checks the procedure).
+
+### Every fixture variant passes a dry run
+
+- **Serves:** Safe anywhere
+- **Done when:** `make check VENV=/home/dispatch-w-npie/venvs/npie` passes with `tests/test_npie_run_safe_end.py` dry-running to `passed` every fixture variant of `tests/test_npie_rated_input.py`, with no exclusion list, and `tests/test_npie_dry_run.py` finding no rails, programming or blocks stage (and no flash or console step) in a procedure with no power-up stage, and in every boost variant an open-loop D0 whose Vin/(1-D0) is below safety.vout_ov_v, each output-voltage trip's threshold and the output net's rating.
+- **Status:** done
+- **Pull requests:** the PR from `dispatch/76` (#75's test left out three variants whose dry runs failed. A board procgen never powers (no input net, or a first power above the input's rating) still got a programming stage, which says "the board stays powered from the supply", and a blocks stage that talks to its firmware, so the run failed at the flash. Both stages now need the power-up stage, as rails already did. A boost's open-loop D0 was aimed at half `safety.vout_ov_v` and nothing else, so `fallbacks` (vout_ov_v 400 V, ovp trip at 22 V, output rated 30 V) asked for 150 V at D0. The trip fired and the scope steps after it read a stopped bridge. On a board with no hardware trip, that output would have gone past its rating. `procgen._ov_level` now gives the lowest of the three, for the power stage and for the limits stage's under-voltage check. On the `boost` fixture, D0 drops from 0.167 to 0.091 (ovp at 22 V, under vout_ov_v 24 V). `fallbacks` moved to its own 400 V-rated `/VOUT`, so it still reaches `DUTY_MAX_DEFAULT`. With the procgen change stashed, 5 tests fail).
