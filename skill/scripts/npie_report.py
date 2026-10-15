@@ -21,24 +21,31 @@ Set in pdf-material-builder's house style: housestyle.sty used by path
 (NPIE_HOUSE_STYLE, else the copy vendored in reference/house-style beside
 these scripts), lualatex from NPIE_LUALATEX else PATH, two passes staged in a
 temp dir so only report.pdf lands in the run. The .tex is pure ASCII.
+Where lualatex or the house style is missing, or the compile fails,
+report.pdf is a plain one instead: the .tex's words in Courier (captures
+named, not drawn), written in pure Python so every host leaves a PDF.
 
 Prints JSON {ok, run, status, tex, pdf, warnings}.
-Exit 0 PDF written; 1 degraded (--tex-only, or lualatex / the house style
-missing or the compile failed: report.tex written, no PDF); 2 error (no
-run.json or procedure.json). Never interactive.
+Exit 0 house-style PDF written; 1 degraded (--tex-only: report.tex, no PDF;
+or lualatex / the house style missing or the compile failed: report.tex and
+the plain report.pdf); 2 error (no run.json or procedure.json). Never
+interactive.
 """
 from __future__ import annotations
 
 import argparse
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
 import tempfile
+import textwrap
 from pathlib import Path
 
 PDF_TIMEOUT = 300  # seconds per lualatex pass
+PLAIN_COLS, PLAIN_ROWS = 96, 72  # Courier 8 pt on A4, for the plain PDF
 _ESC = {"\\": r"\textbackslash{}", "{": r"\{", "}": r"\}", "$": r"\$", "&": r"\&",
         "#": r"\#", "%": r"\%", "_": r"\_", "^": r"\^{}", "~": r"\~{}",
         "<": r"\textless{}", ">": r"\textgreater{}", "|": r"\textbar{}"}
@@ -233,29 +240,140 @@ def compile_pdf(tex: Path, engine: str, style: Path) -> str | None:
     return None
 
 
+_CHARS = {"textbackslash": "\\", "textless": "<", "textgreater": ">", "textbar": "|",
+          "^": "^", "~": "~", "textperiodcentered": "-"}
+_CMD = re.compile(r"\\([A-Za-z]+|.)(\{\})?")
+
+
+def _group(s: str, i: int) -> tuple[str, int]:
+    """The {...} group opening at s[i] -> (its inside, the index after it)."""
+    d, j = 0, i
+    while j < len(s):
+        if s[j] == "\\":
+            j += 2
+            continue
+        d += {"{": 1, "}": -1}.get(s[j], 0)
+        j += 1
+        if d == 0:
+            break
+    return s[i + 1:j - 1], j
+
+
+def detex(s: str) -> str:
+    """esc()'d LaTeX -> its text: escapes undone, commands and braces dropped."""
+    out, i = [], 0
+    while i < len(s):
+        m = _CMD.match(s, i)
+        if not m:
+            out.append("" if s[i] in "{}" else s[i])
+            i += 1
+        elif m[1] in _CHARS:
+            out.append(_CHARS[m[1]])
+            i = m.end()
+        else:
+            out.append(m[1] if m[1] in "{}$&#%_" else " " if m[1] == " " else "")
+            i += 1 + len(m[1])
+    return "".join(out)
+
+
+def plain_text(tex: str) -> list[str]:
+    """report.tex's words as plain lines, in its order: what a report PDF
+    holds where lualatex can't set it in the house style."""
+    body = tex.split(r"\begin{document}", 1)[1].split(r"\end{document}", 1)[0]
+    out = []
+    for line in body.splitlines():
+        if line.startswith(r"\hstitleblock"):
+            i, args = len(r"\hstitleblock"), []
+            for _ in range(3):
+                a, i = _group(line, i)
+                args.append(detex(a))
+            out += args
+        elif line.startswith(r"\begin{hscallout}"):
+            title, i = _group(line, len(r"\begin{hscallout}"))
+            out += ["", f"** {detex(title)}: " + detex(line[i:].replace(r"\end{hscallout}", ""))]
+        elif line.startswith(r"\begin{hsstatrow}"):
+            stats = re.findall(r"\\hsstat\{(\d+)\}\{([^{}]*)\}", line)
+            out += ["", ", ".join(f"{v} {k}" for v, k in stats) + "."]
+        elif line.startswith(r"\section{"):
+            t = detex(_group(line, len(r"\section"))[0])
+            out += ["", t, "=" * len(t)]
+        elif line.startswith(r"\begin{hsfigure}"):
+            i = len(r"\begin{hsfigure}")
+            fid, i = _group(line, i)
+            cap, i = _group(line, i)
+            out.append(f"Figure {detex(fid)}: {detex(cap)} (not drawn here)")
+        elif line.rstrip().endswith("\\\\"):  # a table row
+            out.append(" | ".join(detex(c).strip() for c in
+                                  re.split(r"(?<!\\)&", line.rstrip()[:-2])))
+        elif line not in ("{\\small", "}", r"\sloppy") and not line.startswith(
+                (r"\begin{longtable}", r"\end{longtable}", r"\hstoprule", r"\hline", r"\endhead")):
+            out.append(detex(line).strip())
+    return out
+
+
+def _pdf_str(s: str) -> str:
+    return s.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+
+
+def plain_pdf(lines: list[str], path: Path) -> None:
+    """A text-only PDF of lines: Courier on A4, no fonts embedded, no tools
+    needed, so any host can leave one."""
+    rows = [r for l in lines for r in (textwrap.wrap(l, PLAIN_COLS, subsequent_indent="  ",
+                                                      break_on_hyphens=False) or [""])]
+    pages = [rows[i:i + PLAIN_ROWS] for i in range(0, len(rows), PLAIN_ROWS)] or [[]]
+    objs = ["<< /Type /Catalog /Pages 2 0 R >>", "",
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Courier /Encoding /WinAnsiEncoding >>"]
+    kids = []
+    for pg in pages:
+        body = "BT /F1 8 Tf 10 TL 50 800 Td\n" + "".join(
+            f"({_pdf_str(r)}) Tj T*\n" for r in pg) + "ET"
+        objs.append(f"<< /Length {len(body)} >>\nstream\n{body}\nendstream")
+        objs.append("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] "
+                    f"/Resources << /Font << /F1 3 0 R >> >> /Contents {len(objs)} 0 R >>")
+        kids.append(len(objs))
+    objs[1] = (f"<< /Type /Pages /Kids [{' '.join(f'{k} 0 R' for k in kids)}] "
+               f"/Count {len(kids)} >>")
+    out, offs = b"%PDF-1.4\n", []
+    for n, o in enumerate(objs, 1):
+        offs.append(len(out))
+        out += f"{n} 0 obj\n{o}\nendobj\n".encode("ascii")
+    xref = len(out)
+    out += (f"xref\n0 {len(objs) + 1}\n0000000000 65535 f \n"
+            + "".join(f"{o:010d} 00000 n \n" for o in offs)
+            + f"trailer\n<< /Size {len(objs) + 1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n"
+            ).encode("ascii")
+    path.write_bytes(out)
+
+
 def write(rdir: Path, tex_only: bool = False, why_tex_only: str = "--tex-only") -> dict:
     """report.tex, then report.pdf unless tex_only -> {ok, run, status, tex,
-    pdf, warnings}. Raises OSError / ValueError on a dir that is not a run;
-    npie_run.py calls this whenever a run stops."""
+    pdf, warnings}. Where the house-style PDF can't be built, report.pdf is
+    the plain one and ok is false. Raises OSError / ValueError on a dir that
+    is not a run; npie_run.py calls this whenever a run stops."""
     run = json.loads((rdir / "run.json").read_text(encoding="utf-8"))
     proc = json.loads((rdir / "procedure.json").read_text(encoding="utf-8"))
     tex = rdir / "report.tex"
-    tex.write_text(build_tex(rdir, run, proc), encoding="ascii")
+    src = build_tex(rdir, run, proc)
+    tex.write_text(src, encoding="ascii")
+    pdf = tex.with_suffix(".pdf")
     warn = []
     if tex_only:
         warn.append(f"{why_tex_only}: no PDF built")
-    elif not lualatex():
-        warn.append("lualatex not found (set NPIE_LUALATEX)")
-    elif not house_style():
-        warn.append("housestyle.sty not found (set NPIE_HOUSE_STYLE)")
     else:
-        why = compile_pdf(tex, lualatex(), house_style())
+        if not lualatex():
+            why = "lualatex not found (set NPIE_LUALATEX)"
+        elif not house_style():
+            why = "housestyle.sty not found (set NPIE_HOUSE_STYLE)"
+        else:
+            why = compile_pdf(tex, lualatex(), house_style())
         if why:
-            warn.append(why)
-    pdf = tex.with_suffix(".pdf")
-    ok = not warn and pdf.is_file()
-    return {"ok": ok, "run": str(rdir), "status": run["status"], "tex": str(tex),
-            "pdf": str(pdf) if ok else None, "warnings": warn}
+            plain_pdf([f"Plain report: {why}. report.tex beside this is the house-style "
+                       "source; npie_report.py --run <this dir> rebuilds it where lualatex is.",
+                       ""] + plain_text(src), pdf)
+            warn += [why, "plain PDF written instead of the house style"]
+    return {"ok": not warn and pdf.is_file(), "run": str(rdir), "status": run["status"],
+            "tex": str(tex), "pdf": str(pdf) if not tex_only and pdf.is_file() else None,
+            "warnings": warn}
 
 
 def main(argv=None) -> int:

@@ -29,6 +29,13 @@ Filed by runs. Each says what done looks like as something a run can check, and 
 - **Status:** open
 - **Pull requests:** [#54](https://github.com/ihsan-sa/npie/pull/54) (no host that runs the checks had lualatex, CI included, so every PDF assertion skipped and no check had ever compiled a report. CI now installs TeX Live and sets `NPIE_REQUIRE_PDF=1`. #54 is merged, but a run can't see CI, so the goal stays open until someone confirms the `check` workflow is green on main).
 
+### Every ended run leaves a PDF on any host
+
+- **Serves:** Every run on record
+- **Done when:** `make check VENV=/home/dispatch-w-npie/venvs/npie` passes with `tests/test_npie_run_report.py` finding a `report.pdf` that starts `%PDF-` in the run dir of every ended run (passed, failed, aborted, failed by a person), with or without lualatex on the host, and, with lualatex forced missing, a PDF whose xref points at each of its objects and whose text holds the run's status and failed step; and with `tests/test_npie_report_limits.py` finding every step's limit and `derived_from` in the plain report's text for every fixture variant.
+- **Status:** open
+- **Pull requests:** the PR from `dispatch/61`.
+
 ## Later
 
 Goals waiting for an open slot. When a proposed goal closes, the run that closed it moves the top one here up into Proposed goals as open.
