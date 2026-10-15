@@ -178,7 +178,9 @@ Safety in the runner, independent of the procedure: on any failed step and
 on any error it turns the supply outputs off before it stops, and records
 that in `safe_state`. A live bench (`--bench`) is refused unless the host
 sets `NPIE_BENCH_HOST=1`; only the bench host does (bench-hosts.md), so the
-box cannot open an instrument by accident.
+box cannot open an instrument by accident. The drivers check it too, at each
+door to hardware (VISA, serial, sigrok-cli, the flash tool), so a driver built
+outside the runner is refused the same way.
 
 `--dry-run` runs against the simulated bench (`SimBoard`, section 4) and
 confirms human steps itself as `sim`, so one call runs the whole procedure.

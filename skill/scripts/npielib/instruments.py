@@ -20,7 +20,9 @@ for every role. The pwm and awg sims are models of the instrument's own
 protocol (bytes for the gateware, SCPI for the SDG) with the live driver
 class on top, so the tests exercise the code a real bench runs. pyvisa and
 pyserial are imported only when a live driver is built, so the box - which
-only ever runs sim - never needs them. The live drivers are written against
+only ever runs sim - never needs them. Every door to hardware (VISA, serial,
+sigrok-cli, the flash tool) calls _bench_host first, which refuses unless
+NPIE_BENCH_HOST=1, so a live driver built outside Bench is refused too. The live drivers are written against
 the generic SCPI sets (Siglent's own for the SDG) and have not met a real
 instrument yet (LEARNINGS verify-later); the sim drivers are what the tests
 exercise.
@@ -562,7 +564,16 @@ def _sim_png(path: Path, last):
 # =================================================================== live
 
 
+def _bench_host(what: str) -> None:
+    """Refuse unless this host is marked as the bench host. Every door to
+    hardware (VISA, serial, sigrok-cli, the flash tool) calls this first, so a
+    driver built outside Bench.role is refused too."""
+    if os.environ.get("NPIE_BENCH_HOST") != "1":
+        raise BenchError(f"refusing to open {what}: NPIE_BENCH_HOST=1 is not set on this host")
+
+
 def _visa(resource: str):
+    _bench_host(f"VISA resource {resource}")
     try:
         import pyvisa
     except ImportError as exc:
@@ -624,13 +635,24 @@ class ScpiScope:
         path.write_bytes(bytes(self.i.read_raw())[11:])   # strip the IEEE block header
 
 
+def _serial(cfg, timeout: float):
+    _bench_host(f"serial port {cfg.get('port')}")
+    try:
+        import serial
+    except ImportError as exc:
+        raise BenchError("pyserial is not installed on this host") from exc
+    return serial.Serial(cfg["port"], int(cfg.get("baud", 115200)), timeout=timeout)
+
+
 class SigrokLogic:
     def __init__(self, cfg):
+        _bench_host("sigrok-cli")
         if not shutil.which("sigrok-cli"):
             raise BenchError("sigrok-cli is not on PATH")
         self.dev = cfg.get("device", "fx2lafw")
 
     def capture(self, channels, samplerate, duration_s):
+        _bench_host("sigrok-cli")
         with tempfile.TemporaryDirectory() as td:
             out = Path(td) / "cap.csv"
             subprocess.run(["sigrok-cli", "-d", self.dev, "-c", f"samplerate={samplerate}",
@@ -653,11 +675,7 @@ class SigrokLogic:
 
 class SerialConsole:
     def __init__(self, cfg):
-        try:
-            import serial
-        except ImportError as exc:
-            raise BenchError("pyserial is not installed on this host") from exc
-        self.s = serial.Serial(cfg["port"], int(cfg.get("baud", 115200)), timeout=0.1)
+        self.s = _serial(cfg, timeout=0.1)
         self.buf: list[str] = []
 
     def send(self, line):
@@ -773,11 +791,7 @@ class Pwm8:
 
 class _SerialLink:
     def __init__(self, cfg):
-        try:
-            import serial
-        except ImportError as exc:
-            raise BenchError("pyserial is not installed on this host") from exc
-        self.s = serial.Serial(cfg["port"], int(cfg.get("baud", 115200)), timeout=0.5)
+        self.s = _serial(cfg, timeout=0.5)
         self.s.reset_input_buffer()
 
     def write(self, data: bytes):
@@ -856,9 +870,11 @@ class ScpiSdg:
 
 class SwdProbe:
     def __init__(self, cfg):
+        _bench_host(f"the {cfg.get('tool', 'probe-rs')} flash tool")
         self.tool = cfg.get("tool", "probe-rs")
 
     def flash(self, manifest, workspace):
+        _bench_host(f"the {self.tool} flash tool")
         cmds = manifest.get("flash", {}).get("commands", {})
         if self.tool not in cmds:
             raise BenchError(f"manifest has no flash command for {self.tool}")
@@ -917,9 +933,7 @@ class Bench:
                 drv = LIVE.get(rc.get("driver"))
                 if drv is None:
                     raise BenchError(f"unknown driver {rc.get('driver')!r} for {name}")
-                if os.environ.get("NPIE_BENCH_HOST") != "1":
-                    raise BenchError(f"refusing to open the {rc.get('driver')} driver for "
-                                     f"{name}: NPIE_BENCH_HOST=1 is not set on this host")
+                _bench_host(f"the {rc.get('driver')} driver for {name}")
                 self._open[name] = _Named(name, rc["driver"], drv(rc))
         return self._open[name]
 
