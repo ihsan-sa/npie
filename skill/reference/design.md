@@ -183,9 +183,12 @@ passed, 1 a step failed or the run is waiting on a person (the payload's
 `status` says which), 2 error or refusal (the run is `aborted` when an
 instrument call failed mid-run).
 
-Safety in the runner, independent of the procedure: on any failed step and
-on any error it turns the supply outputs off before it stops, and records
-that in `safe_state`. A live bench (`--bench`) is refused unless the host
+Safety in the runner, independent of the procedure: whenever a run ends
+(passed, on any failed step and on any error) it turns the supply outputs
+off, then any pwm or awg outputs the run drove, before it stops, and records
+that in `safe_state`. A passed run is no exception: a procedure need not end
+with the supply off (a board with no operating range skips the limits stage
+that does), and nobody may be at the bench to do it. A live bench (`--bench`) is refused unless the host
 sets `NPIE_BENCH_HOST=1`; only the bench host does (bench-hosts.md), so the
 box cannot open an instrument by accident. The drivers check it too, at each
 door to hardware (VISA, serial, sigrok-cli, the flash tool), so a driver built

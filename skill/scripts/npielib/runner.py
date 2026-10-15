@@ -10,8 +10,9 @@ board's does.
 
 The engine never waits on a person: a human step ends the invocation with
 status awaiting_human, `confirm` records the answer and `advance` carries on.
-Any failed step or instrument error turns the supply outputs off, then any
-pwm or awg outputs the run drove, before the run stops (reference/design.md section 3).
+A run that ends, passed, failed or aborted, turns the supply outputs off,
+then any pwm or awg outputs the run drove, before it stops (reference/design.md
+section 3).
 """
 from __future__ import annotations
 
@@ -141,10 +142,12 @@ class Run:
                                   else f"no supply reachable to turn off ({why})")
 
     def finish(self, status: str, why: str | None = None):
+        # a passed run too: a procedure need not end with the supply off (its
+        # last supply-off step is in the limits stage, which a board without
+        # an operating range skips), and nobody may be at the bench when it ends
         self.rec["status"] = status
         self.rec["finished"] = now()
-        if status != "passed":
-            self.safe_off(why or status)
+        self.safe_off(why or status)
 
 
 def _manifest(ws: Path) -> dict | None:

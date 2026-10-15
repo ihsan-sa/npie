@@ -70,6 +70,7 @@ What has landed, from the git history (a line per PR). A proposed goal that clos
 - [#67](https://github.com/ihsan-sa/npie/pull/67) Write the report PDF for a run waiting on a person too
 - [#69](https://github.com/ihsan-sa/npie/pull/69) Read the VIN range however requirements.md writes it
 - [#71](https://github.com/ihsan-sa/npie/pull/71) Refuse an override the runner can't hold a step to
+- [#73](https://github.com/ihsan-sa/npie/pull/73) Show every console field's limit in procedure.md
 
 ### Every limit names its design input
 
@@ -202,4 +203,11 @@ What has landed, from the git history (a line per PR). A proposed goal that clos
 - **Serves:** Limits from the design
 - **Done when:** `make check VENV=/home/dispatch-w-npie/venvs/npie` passes with `tests/test_npie_procedure_md.py` rendering procedure.md for every fixture variant of `tests/test_npie_limit_fields.py` and finding each step in exactly one four-cell table row whose From cell is its `derived_from` and, for each step with `expect` or `fields`, whose Limit cell holds every bound and unit of its `expect` and of each console field, by the field's name; and a manifest banner regex with a `|` in it still giving that step one four-cell row with the whole regex in it.
 - **Status:** done
-- **Pull requests:** the PR from `dispatch/72` (procedure.md, the page a person follows at the bench, printed only `expect`, so a console step checked by `fields` (the firmware's vbus reading, the closed-loop Vout, the OVP and OCP trips' `outputs_on`) had an empty Limit cell, which #56 had fixed in the report but not here. A `|` in a manifest regex, such as `^(fwe mini|fwe boot) `, split its row into five cells, so the regex was cut in two and the From column shifted. `render.step_limit_text` now prints each field's limit by name, and each cell escapes `|`. With the render change stashed, 11 of the 12 new tests fail).
+- **Pull requests:** [#73](https://github.com/ihsan-sa/npie/pull/73) (procedure.md, the page a person follows at the bench, printed only `expect`, so a console step checked by `fields` (the firmware's vbus reading, the closed-loop Vout, the OVP and OCP trips' `outputs_on`) had an empty Limit cell, which #56 had fixed in the report but not here. A `|` in a manifest regex, such as `^(fwe mini|fwe boot) `, split its row into five cells, so the regex was cut in two and the From column shifted. `render.step_limit_text` now prints each field's limit by name, and each cell escapes `|`. With the render change stashed, 11 of the 12 new tests fail).
+
+### Every ended run leaves the supply off
+
+- **Serves:** Safe anywhere
+- **Done when:** `make check VENV=/home/dispatch-w-npie/venvs/npie` passes with `tests/test_npie_run_safe_end.py` finding that a board with no operating range in requirements.md gives a procedure whose last supply step leaves the output on, and, dry-running to `passed` every fixture variant of `tests/test_npie_rated_input.py` whose dry run passes plus that board and the RF drive stage of `tests/test_npie_rf_instruments.py`, the simulated supply off with `safe_state` saying so, and the pwm generator and both awg channels the RF run drove off.
+- **Status:** done
+- **Pull requests:** the PR from `dispatch/74` (the runner turned the outputs off only when a run failed or aborted. A passed run left them as its last step did, and procgen's only end-of-run supply-off is in the limits stage, which a board with no operating range skips. So a passed run on such a board, or one after a stage that drives the pwm or awg, left the board powered and driven, on a real bench perhaps with nobody there. `runner.Run.finish` now calls `safe_off` for every ended run. With the runner change stashed, 13 of the 14 new tests fail, all but the one that checks the procedure).
