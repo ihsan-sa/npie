@@ -38,6 +38,12 @@ import tempfile
 import time
 from pathlib import Path
 
+try:
+    import fcntl
+except ImportError:      # Windows
+    fcntl = None
+    import msvcrt
+
 
 class BenchError(Exception):
     """A role is missing, a driver is unknown or an instrument call failed."""
@@ -937,13 +943,67 @@ class _Named:
         return call
 
 
+LOCK_DIR_ENV = "NPIE_LOCK_DIR"   # where instrument locks live; the host's temp dir if unset
+
+
+def lock_dir() -> Path:
+    return Path(os.environ.get(LOCK_DIR_ENV) or Path(tempfile.gettempdir()) / "npie-instruments")
+
+
+def _address(rc: dict) -> str:
+    """What a live instrument is on this host: its VISA resource or serial
+    port, else its driver and device (sigrok) or tool (swd)."""
+    return str(rc.get("resource") or rc.get("port")
+               or f"{rc['driver']}:{rc.get('device') or rc.get('tool') or ''}")
+
+
+def _hold(address: str, what: str):
+    """Lock `address` host-wide for this process (until the file is closed,
+    or the process dies and the OS lets go), or raise naming the holder."""
+    d = lock_dir()
+    d.mkdir(parents=True, exist_ok=True)
+    f = open(d / (re.sub(r"[^A-Za-z0-9._-]", "_", address) + ".lock"), "a+", encoding="ascii")
+    try:
+        f.seek(0)
+        if fcntl is not None:
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        else:
+            msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
+    except OSError:
+        try:
+            f.seek(0)
+            pid = f.read().strip()
+        except OSError:      # Windows won't read a locked byte
+            pid = ""
+        f.close()
+        raise BenchError(f"{what} at {address} is open in another npie process"
+                         f"{f' (pid {pid})' if pid else ''}; one process drives an instrument "
+                         "at a time: wait for that run to stop, or stop it") from None
+    f.seek(0)
+    f.truncate()
+    f.write(f"{os.getpid()}\n")
+    f.flush()
+    return f
+
+
+def _let_go(f) -> None:
+    if fcntl is None:
+        f.seek(0)
+        msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
+    f.close()
+
+
 class Bench:
-    """Role -> driver instance. Built lazily so a run opens only what it uses."""
+    """Role -> driver instance. Built lazily so a run opens only what it uses.
+    A live bench holds each instrument's address host-wide (_hold) from the
+    first call on it until close(), so a second run, from another workspace
+    or another start, can't drive an instrument this one has open."""
 
     def __init__(self, cfg: dict, sim_board: SimBoard | None = None):
         self.cfg, self.sim = cfg, sim_board
         self.name = "sim" if sim_board else cfg.get("bench", "bench")
         self._open: dict = {}
+        self._held: dict = {}       # address -> its locked file
 
     def role(self, name: str):
         if name not in self._open:
@@ -957,8 +1017,23 @@ class Bench:
                 if drv is None:
                     raise BenchError(f"unknown driver {rc.get('driver')!r} for {name}")
                 _bench_host(f"the {rc.get('driver')} driver for {name}")
-                self._open[name] = _Named(name, rc["driver"], drv(rc))
+                addr = _address(rc)
+                new = addr not in self._held
+                if new:
+                    self._held[addr] = _hold(addr, f"{name} ({rc['driver']})")
+                try:
+                    self._open[name] = _Named(name, rc["driver"], drv(rc))
+                except BaseException:
+                    if new:      # not opened: let the next try, or another run, have it
+                        _let_go(self._held.pop(addr))
+                    raise
         return self._open[name]
+
+    def close(self):
+        """Let go of every instrument this bench holds."""
+        self._open.clear()
+        while self._held:
+            _let_go(self._held.popitem()[1])
 
     def safe_off(self) -> str | None:
         """Supply outputs off, then the outputs of any drive source this run

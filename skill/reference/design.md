@@ -201,6 +201,17 @@ process that died with no say (SIGKILL, out of memory, its host went down).
 That call aborts it, supply off, report written, rather than carry on from a
 step whose outcome nobody knows.
 
+One process drives an instrument at a time, too: a live bench holds a
+host-wide lock on each instrument's address (its VISA resource or serial
+port, else its driver and device or tool) from the first call on it until
+the process lets go of the run, in the host's temp dir (`npie-instruments/`,
+or `NPIE_LOCK_DIR`). A second run, from another `start` or another
+workspace whose bench.yaml names the same supply, is refused that
+instrument, naming the holder's pid, and aborts without writing to it, its
+end-of-run off included, so its `safe_state` says "supply not confirmed
+off". The lock is held only while a process runs: a run waiting on a person
+holds nothing.
+
 Safety in the runner, independent of the procedure: whenever a run ends
 (passed, on any failed step and on any error) it turns the supply outputs
 off, then any pwm or awg outputs the run drove, before it stops, and records
