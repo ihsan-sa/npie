@@ -512,7 +512,14 @@ class _Builder:
             return
         d, m = self.d, self.d.manifest
         g = self.point(self.gnd) if self.gnd else None
+        known = {c["name"]: c for c in (m or {}).get("commands", [])}
         for h in (m or {}).get("test_hooks", []):
+            word = h["send"].split()[0] if h["send"].split() else ""
+            if known.get(word, {}).get("safe") is not True:
+                # a hook is unattended, but not one the manifest doesn't call safe
+                self.human(f"The next step runs firmware test hook {h['name']} "
+                           f"(`{h['send']}`), which the manifest does not mark safe. "
+                           "Outputs unloaded, hands clear.")
             self.step("console", role="console", send=h["send"], expect_re=h["expect"],
                       timeout_s=h.get("timeout_s", 5),
                       derived_from=f"manifest test_hooks[{h['name']}]",
@@ -896,6 +903,11 @@ class _Builder:
                 level = self._ov_level()
                 d0 = self._open_duty(self.v_first, level[0] * D0_AIM_FRAC) if level else None
             if d0 is not None:
+                self.human(f"Output open: nothing on {self.boost['out']}'s connectors. The next "
+                           f"steps switch {self.boost['ic']} open loop at D0 = {d0:g} from "
+                           f"{self.v_first:g} V, then drop the supply to "
+                           f"{round(uv - UV_UNDERSHOOT_V, 2):g} V to trip the under-voltage. "
+                           "Hands clear.")
                 self.step("supply", role="psu",
                           set={"v": self.v_first, "i_limit": self.ilim, "output": True},
                           derived_from="D0 was set for this input")
