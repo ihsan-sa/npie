@@ -40,7 +40,10 @@ bringup/
 `procedure.json` is regenerated whenever the design or the manifest changes;
 it carries the sha256 of every input, so a run records exactly which design
 it tested and `npie_run.py` refuses a procedure whose inputs changed since
-it was generated (regenerate, then run).
+it was generated (regenerate, then run). A run waiting on a person checks
+again at `confirm` and `resume`: if an input changed meanwhile, the run is
+aborted with the supply off and the changed inputs named, and a new run
+starts from the regenerated procedure.
 
 ## 2. The procedure: stages, steps, limits
 

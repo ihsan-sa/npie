@@ -11,7 +11,9 @@ wrote it, snapshots it into <workspace>/bringup/runs/<stamp>-<label>/ and runs
 to the first human step, the first failure or the end. A human step never
 blocks: the run stops with status awaiting_human; confirm records who
 answered (and the reading, when the step asks for one), resume carries on.
-confirm --fail fails the step and ends the run.
+confirm --fail fails the step and ends the run. If a design input changed
+while the run waited, confirm and resume abort it instead (supply off, the
+changed inputs named), since its limits are no longer the design's.
 
 --dry-run runs against the simulated bench (npielib/instruments.SimBoard): it
 opens nothing and runs anywhere. It confirms human steps itself as "sim"

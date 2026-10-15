@@ -142,6 +142,36 @@ def test_stale_procedure_is_refused(tmp_path):
     assert rc == 2 and "overrides" in out["error"]
 
 
+@pytest.mark.parametrize("cmd", ["confirm", "resume"])
+@pytest.mark.parametrize("change", ["constraints", "overrides"])
+def test_a_design_change_while_waiting_aborts_the_run(tmp_path, cmd, change):
+    # start only checks the design once; a run held on a person for days must
+    # not go on against limits the design no longer gives
+    ws = _ws(tmp_path)
+    rc, out = _run("start", "--workspace", str(ws), "--dry-run", "--hold")
+    run, step = out["run"], out["awaiting"]["step"]
+    if cmd == "resume":
+        rc, c = _run("confirm", "--run", run, "--step", step, "--by", "ihsan")
+        assert rc == 1 and c["status"] == "awaiting_human", c
+    if change == "constraints":
+        cons = ws / "kicad" / "constraints.json"
+        cons.write_text(cons.read_text() + "\n")
+    else:
+        (ws / "bringup" / "overrides.yaml").write_text("rails.02: {max: 5.2}\n")
+    args = ("--step", step, "--by", "ihsan") if cmd == "confirm" else ()
+    rc, out = _run(cmd, "--run", run, *args)
+    assert rc == 2 and out["status"] == "aborted", out
+    assert "design inputs changed" in out["error"] and change in out["error"]
+    assert out["safe_state"].startswith("supply outputs off")
+    rec = _record(out)
+    assert rec["status"] == "aborted"
+    assert [r["id"] for r in rec["steps"]] == ([step] if cmd == "resume" else [])
+    assert (Path(run) / "report.tex").is_file() and out["report"]["tex"]
+    assert not (Path(run) / "sim-board.pickle").exists()
+    rc, again = _run("resume", "--run", run)
+    assert rc == 2 and "run is aborted" in again["error"]
+
+
 def test_edited_snapshot_is_refused(tmp_path):
     rc, out = _run("start", "--workspace", str(_ws(tmp_path)), "--dry-run", "--hold")
     snap = Path(out["run"]) / "procedure.json"

@@ -49,6 +49,18 @@ def stale_inputs(proc: dict, ws: Path) -> list[str]:
                   if cur.get(n, {}).get("sha256") != proc.get("inputs", {}).get(n, {}).get("sha256"))
 
 
+def _abort_if_stale(run: "Run") -> bool:
+    """A run that waited on a person while the design changed would go on
+    against limits the design no longer gives: abort it, supply off."""
+    stale = stale_inputs(run.proc, run.ws)
+    if not stale:
+        return False
+    run.rec["error"] = (f"{run.rec['cursor']}: design inputs changed since the run started ("
+                        + ", ".join(stale) + "); rerun procedure_gen.py and start a new run")
+    run.finish("aborted", "design changed")
+    return True
+
+
 def within(value, e: dict) -> bool:
     if value is None:
         return False
@@ -292,6 +304,8 @@ def advance(run: Run) -> Run:
     try:
         if run.bench is None:     # inside the try: a bench that can't be built aborts the run
             run.open_bench()
+        if _abort_if_stale(run):
+            return run
         for s in run.steps[run.index(run.rec["cursor"]):]:
             run.rec["cursor"] = s["id"]
             if s["type"] == "human":
@@ -340,6 +354,10 @@ def confirm(run: Run, step: str, by: str, value: str | None, fail: str | None) -
         raise RunError(f"the run is waiting on {run.rec['cursor']}, not {step}")
     if not by.strip():
         raise RunError("--by must name who confirmed")
+    if _abort_if_stale(run):     # the step's text and limit may no longer be the design's
+        run.save()
+        run.keep_sim()
+        return run
     s = run.steps[run.index(step)]
     rec = {"confirmed_by": by, "confirmed_at": now()}
     verdict = "pass"
