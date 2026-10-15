@@ -4,7 +4,9 @@ Each case dry-runs the mini-bldc fixture to one way a run can stop (passed,
 failed, aborted, waiting on a person) and checks that the run dir holds a
 report.tex that names that status, and that the JSON names the report. An
 ended run also gets report.pdf where lualatex is on the host; elsewhere the
-JSON says why not. Nothing here opens an instrument.
+JSON says why not. With NPIE_REQUIRE_PDF=1, as CI sets it, a host without
+lualatex fails here instead of skipping the PDF. Nothing here opens an
+instrument.
 """
 from __future__ import annotations
 
@@ -24,6 +26,8 @@ import npie_run  # noqa: E402
 from npielib import instruments  # noqa: E402
 
 PDF_HOST = bool(npie_report.lualatex() and npie_report.house_style())
+REQUIRE_PDF = os.environ.get("NPIE_REQUIRE_PDF") == "1"
+CI = ROOT / ".github" / "workflows" / "check.yml"
 
 
 def _ws(tmp_path) -> Path:
@@ -57,6 +61,19 @@ def _on_record(out, status, ended=True):
     if not ended:
         assert "run not ended" in rep["warnings"][0]
     return tex
+
+
+def test_a_host_that_requires_the_pdf_can_build_it():
+    assert PDF_HOST or not REQUIRE_PDF, (
+        "NPIE_REQUIRE_PDF=1 but lualatex or housestyle.sty is missing, so no report PDF "
+        "would be built")
+
+
+def test_ci_builds_the_report_pdf():
+    # the only place make check is sure to meet lualatex; without it every PDF
+    # assertion here skips and no check ever compiles a report
+    ci = CI.read_text(encoding="utf-8")
+    assert "texlive-luatex" in ci and 'NPIE_REQUIRE_PDF: "1"' in ci, ci
 
 
 def test_a_passed_run_leaves_its_report(tmp_path):
