@@ -88,7 +88,10 @@ each limit comes from:
    the bench (limit: 2 % of nominal pk-pk).
 6. **programming** - flash with the manifest's command for the probe the
    bench names, then read the boot banner on the console
-   (`banner_regex`) and the boot event.
+   (`banner_regex`) and the boot event. Like the rails and blocks stages,
+   it needs the power-up stage: with no supply setpoint (no input net, or a
+   first power above the input's rating) it is skipped, not run on an
+   unpowered board.
 7. **blocks** - the manifest's `test_hooks` (unattended), then per-block
    checks the netlist implies: sense offsets (CSA outputs at mid-supply),
    bus-voltage reading vs the supply setpoint, LEDs and buttons (human),
@@ -97,8 +100,11 @@ each limit comes from:
 8. **power-stage** - a boost (a `boost` block in `blocks[]`, a half-bridge
    and a manifest `pwm`), output unloaded. Closed loop: `arm`, then
    `status` vout_v at `safety.vout_target_v` +/-5 %. Open loop: `duty D0`,
-   D0 aimed at half `safety.vout_ov_v` (the HRTIM bridge is synchronous, so
-   Vout = Vin/(1-D) with no load and the step cannot run away); a meter
+   D0 aimed at half the lowest of `safety.vout_ov_v`, each output-voltage
+   trip's threshold and the output net's rating in `voltages[]` (a D0 past
+   a trip trips the bridge before the checks that need it switching; the
+   HRTIM bridge is synchronous, so Vout = Vin/(1-D) with no load and the
+   step cannot run away); a meter
    reads Vout +/-10 %, the scope reads `pwm.freq_hz` +/-2 %, D0 +/-0.03 on
    the low-side gate and the dead time (`dead_time_ns` -2/+3 ns) from the
    low side's falling edge to the high side's rising edge. Then every

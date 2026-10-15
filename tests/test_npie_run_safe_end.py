@@ -10,6 +10,10 @@ there, left the board powered and, after the RF stage, the pwm generator
 and the awg driving it. Each fixture variant of test_npie_rated_input that
 powers the board is dry-run to its end here, plus the RF drive stage of
 test_npie_rf_instruments, and the simulated bench must be off.
+
+Every variant is run, with no exclusion list (GOALS.md, Every fixture
+variant passes a dry run): a variant whose dry run fails is a procgen or sim
+bug to fix, not one to leave out.
 """
 from __future__ import annotations
 
@@ -27,8 +31,8 @@ if str(NPIE) not in sys.path:
 
 import procedure_gen  # noqa: E402
 from npielib import runner  # noqa: E402
-from test_npie_limit_trace import FIX, _fallbacks  # noqa: E402
-from test_npie_rated_input import ALL, _first_power_over_rating, _no_input  # noqa: E402
+from test_npie_limit_trace import FIX  # noqa: E402
+from test_npie_rated_input import ALL  # noqa: E402
 from test_npie_rf_instruments import _rf_stage  # noqa: E402
 
 
@@ -38,11 +42,7 @@ def _no_range(ws: Path) -> None:
     (ws / "requirements.md").write_text("# mini\n")
 
 
-# Left out, as no dry run of theirs passes: first_power_over_rating and
-# no_input never power the board, and fail at the flash step on an unpowered
-# sim board; fallbacks fails a power-stage scope step on the sim board.
-POWERED = [v for v in ALL if v not in (_first_power_over_rating, _no_input, _fallbacks)]
-POWERED.append(_no_range)
+EVERY = ALL + [_no_range]
 
 
 def _ws(tmp_path: Path, variant) -> Path:
@@ -70,7 +70,7 @@ def test_a_procedure_can_end_with_the_supply_on(tmp_path, capsys):
     assert last["set"]["output"] is True
 
 
-@pytest.mark.parametrize("variant", POWERED, ids=[v.__name__.strip("_") for v in POWERED])
+@pytest.mark.parametrize("variant", EVERY, ids=[v.__name__.strip("_") for v in EVERY])
 def test_a_passed_run_leaves_the_supply_off(tmp_path, capsys, variant):
     run = _run_to_end(_ws(tmp_path, variant))
     assert not run.bench.sim.on
