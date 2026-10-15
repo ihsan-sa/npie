@@ -165,9 +165,9 @@ class Run:
                 pk.unlink()
 
     def safe_off(self, why: str):
-        ok = self.bench.safe_off() if self.bench is not None else False
-        self.rec["safe_state"] = (f"supply outputs off at {now()} ({why})" if ok
-                                  else f"no supply reachable to turn off ({why})")
+        err = self.bench.safe_off() if self.bench is not None else "no bench was opened"
+        self.rec["safe_state"] = (f"supply outputs off at {now()} ({why})" if err is None
+                                  else f"supply not confirmed off at {now()}: {err} ({why})")
 
     def finish(self, status: str, why: str | None = None):
         # a passed run too: a procedure need not end with the supply off (its
