@@ -51,6 +51,10 @@ Every limit is derived from a design fact and says which one in the step's
 - limits: the under-voltage trip is checked while switching at D0 when the
   firmware has a `pwm` block (it latches input trips only while switching),
   else with the bridge idle.
+- every protection the manifest gives (safety.vbus_uv_v, vbus_ov_v, i_trip_a,
+  each trips[] entry) is tested or listed as skipped, naming it: a trip
+  inside the operating range, the input over-current trip, a trip no duty
+  reaches or whose sense net is missing, and trips on a board with no boost.
 """
 from __future__ import annotations
 
@@ -644,6 +648,12 @@ class _Builder:
     def power_stage(self):
         """A boost's switching tests: closed loop, open loop, then every trip."""
         if not self.boost:
+            trips = [f"trips[{t.get('name')}]"
+                     for t in (self.d.manifest or {}).get("trips") or []]
+            if trips:
+                self.skip("power-stage", f"manifest {', '.join(trips)}: provoked only while "
+                                         "switching a boost's power stage, and this board "
+                                         "has no boost block with a manifest pwm; not tested")
             return
         self.stage("power-stage", "Power stage: regulation, PWM, dead time and trips")
         m, d, bst = self.d.manifest, self.d, self.boost
@@ -754,13 +764,15 @@ class _Builder:
                        else thr * OVP_OVERSHOOT)
                 dt_ = self._open_duty(vin, aim)
                 if aim <= thr or vin / (1 - dt_) <= thr:
-                    self.skip(f"power-stage:{name}", f"no duty up to pwm.max_duty and no "
-                              f"output under its {rating:g} V rating reaches the "
-                              f"{thr:g} V trip from {vin:g} V")
+                    under = f"no output under its {rating:g} V rating" if rating else "nothing"
+                    self.skip(f"power-stage:{name}", f"manifest trips[{name}]: no duty up to "
+                              f"pwm.max_duty and {under} reaches the {thr:g} V trip from "
+                              f"{vin:g} V; not tested")
                     continue
             elif not self._net(t.get("sense_net")):
-                self.skip(f"power-stage:{name}", f"sense net {t.get('sense_net')!r} "
-                                                 "is not in the netlist")
+                self.skip(f"power-stage:{name}", f"manifest trips[{name}]: sense net "
+                                                 f"{t.get('sense_net')!r} is not in the "
+                                                 "netlist; not tested")
                 continue
             self.step("console", role="console", send=f"duty {d0:g}", expect_re="^OK ",
                       timeout_s=2, derived_from=f"switching at D0 = {d0:g}: {d0_src}")
@@ -896,7 +908,13 @@ class _Builder:
                       text=f"idle current at {v:g} V")
         saf = (d.manifest or {}).get("safety", {})
         uv = saf.get("vbus_uv_v")
-        if uv is not None and uv < lo:
+        if uv is not None and not UV_UNDERSHOOT_V < uv < lo:
+            self.skip("limits:uv", f"manifest safety.vbus_uv_v {uv:g} V under-voltage trip is "
+                      + (f"at or above requirements VIN min {lo:g} V, so the board would trip "
+                         "inside its operating range" if uv >= lo else
+                         f"too low to go {UV_UNDERSHOOT_V:g} V under")
+                      + "; not tested")
+        elif uv is not None:
             # this firmware latches input trips only while switching
             d0 = None
             if self.boost and "power-stage" in {st["id"] for st in self.stages}:
@@ -930,8 +948,17 @@ class _Builder:
                       expect_re="^OK ", timeout_s=2, derived_from="manifest safety.fault_clear")
         ov = saf.get("vbus_ov_v")
         if ov is not None and ov > hi:
-            self.skip("limits:ov", f"over-voltage trip at {ov:g} V is above the rated "
-                                   f"input max {hi:g} V; not applied")
+            self.skip("limits:ov", f"manifest safety.vbus_ov_v over-voltage trip at {ov:g} V "
+                                   f"is above the rated input max {hi:g} V; not applied")
+        elif ov is not None:
+            self.skip("limits:ov", f"manifest safety.vbus_ov_v {ov:g} V over-voltage trip is "
+                                   f"at or below requirements VIN max {hi:g} V, so the board "
+                                   "would trip inside its operating range; not tested")
+        it = saf.get("i_trip_a")
+        if it is not None:
+            self.skip("limits:i-trip", f"manifest safety.i_trip_a {it:g} A over-current trip: "
+                                       f"provoking it needs a load drawing over {it:g} A, "
+                                       "which the procedure has no step for; not tested")
         self.step("supply", role="psu", set={"v": self.v_first, "i_limit": self.ilim,
                                              "output": False},
                   text="end of run: supply off")
