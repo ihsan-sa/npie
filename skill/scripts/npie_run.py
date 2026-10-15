@@ -37,7 +37,9 @@ and the next confirm or resume aborts it, supply off, rather than carry on
 from a step whose outcome is unknown. One process drives an instrument at a
 time too: a live run holds each instrument's address host-wide while it has
 it open (instruments.Bench), so a second run on the same supply is refused it
-and aborts without touching it. Whenever start, confirm or resume leaves a run, it writes the
+and aborts without touching it. A run waiting on a person holds nothing, so
+resume reads the supply back first and aborts the run, supply off, if it
+isn't as the run's last supply step left it. Whenever start, confirm or resume leaves a run, it writes the
 run's report (npie_report.py): report.tex and report.pdf, a run waiting on a
 person included (its report says it has not ended), so every run is on record. A
 report that cannot be built is a warning under "report", never the run's

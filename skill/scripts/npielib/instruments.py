@@ -342,6 +342,9 @@ class SimPsu:
     def off(self):
         self.b.supply(self.b.v, self.b.ilim, False)
 
+    def state(self) -> dict:
+        return {"v": self.b.v, "i_limit": self.b.ilim, "output": self.b.on}
+
 
 class SimDmm:
     def __init__(self, board: SimBoard):
@@ -622,6 +625,12 @@ class ScpiPsu:
         if self._on() != bool(output):
             raise BenchError(f"psu: channel {self.ch} output reads back "
                              f"{'on' if not output else 'off'}, set {'on' if output else 'off'}")
+
+    def state(self) -> dict:
+        """The channel's settings as the supply reads them back, in set()'s terms."""
+        self.i.write(f"INST:NSEL {self.ch}")
+        return {"v": float(self.i.query("VOLT?")), "i_limit": float(self.i.query("CURR?")),
+                "output": self._on()}
 
     def measure(self, quantity):
         self.i.write(f"INST:NSEL {self.ch}")
