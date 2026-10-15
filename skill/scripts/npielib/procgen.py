@@ -246,8 +246,11 @@ class _Builder:
             self.step("measure", role="dmm", quantity="resistance",
                       points={"plus": p, "minus": g},
                       expect={"nominal": None, "min": floor, "max": None, "unit": "ohm"},
-                      derived_from=f"short check {_short(n)}-GND: floor "
-                                   f"{'power net' if power else 'logic rail'} {floor:g} ohm",
+                      derived_from=f"short check {_short(n)}-GND, a "
+                                   f"{'power net' if power else 'logic rail'} by the netlist "
+                                   f"and constraints: procgen default "
+                                   f"{'R_FLOOR_POWER' if power else 'R_FLOOR_LOGIC'} "
+                                   f"{floor:g} ohm",
                       text=f"{_short(n)} to GND is not a short")
         for b in self.bridges:
             if b.get("ic"):
@@ -339,7 +342,8 @@ class _Builder:
         self.step("measure", role="psu", quantity="current",
                   expect={"nominal": None, "min": IDLE_FLOOR_A,
                           "max": round(0.9 * ilim, 4), "unit": "A"},
-                  derived_from="alive floor; below 90 % of the limit (not in CC)",
+                  derived_from=f"alive floor; below 90 % of the {ilim:g} A limit from "
+                               "constraints power[] (not in CC)",
                   text="idle input current")
         self.human("Touch-test: no part is hot a few seconds after power-up.")
 
@@ -361,13 +365,14 @@ class _Builder:
                 nom = self.v_first
                 exp = {"nominal": nom, "min": round(nom - BOOST_IDLE_DROP_V, 3),
                        "max": round(nom * 1.01, 3), "unit": "V"}
-                src = (f"idle boost output follows the input through {self.boost['ic']}'s "
-                       f"high side: setpoint -{BOOST_IDLE_DROP_V:g} V/+1 %")
+                src = (f"idle boost output follows the input through netlist "
+                       f"{self.boost['ic']}'s high side: setpoint -{BOOST_IDLE_DROP_V:g} V/+1 %")
             elif r["follows_input"]:
                 nom = self.v_first
                 exp = {"nominal": nom, "min": round(nom * 0.95, 3),
                        "max": round(nom * 1.01, 3), "unit": "V"}
-                src = f"follows the input (rated like {_short(self.input)}): setpoint -5 %/+1 %"
+                src = (f"follows the input (constraints voltages[] rated like "
+                       f"{_short(self.input)}): setpoint -5 %/+1 %")
             else:
                 tol = TOL_ASYNC if r["async"] else TOL_REG
                 nom = r["v"]
@@ -390,7 +395,7 @@ class _Builder:
                       expect={"nominal": None, "min": None,
                               "max": round(r["v"] * RIPPLE_FRAC, 4), "unit": "V"},
                       derived_from=f"switched rail ripple <= {RIPPLE_FRAC * 100:g} % of "
-                                   f"{r['v']:g} V",
+                                   f"constraints voltages[{_short(r['net'])}]={r['v']:g} V",
                       text=f"{_short(r['net'])} ripple")
 
     def programming(self):
@@ -448,9 +453,9 @@ class _Builder:
                           points={"plus": p, "minus": g},
                           expect={"nominal": mid, "min": round(mid * 0.97, 3),
                                   "max": round(mid * 1.03, 3), "unit": "V"},
-                          derived_from=f"{u} {d.value(u)} REF1={_short(f['REF1'])}, "
+                          derived_from=f"netlist {u} {d.value(u)} REF1={_short(f['REF1'])}, "
                                        f"REF2={_short(f['REF2'])}: zero-current output "
-                                       f"at their mean +/-3 %",
+                                       f"at the mean of their constraints voltages[] +/-3 %",
                           text=f"{u} sense-amp offset")
         leds = d.refs("D")
         leds = [r for r in leds if re.search(r"LED", d.value(r), re.I)]
@@ -500,7 +505,8 @@ class _Builder:
                 self.step("scope", role="scope", channel=1, quantity="duty",
                           points={"plus": p, "minus": g}, screenshot=True,
                           expect={"nominal": 0.5, "min": 0.45, "max": 0.55, "unit": ""},
-                          derived_from="commanded duty 0.5 +/-0.05",
+                          derived_from="0.5 as commanded with manifest commands[duty], "
+                                       "+/-0.05",
                           text=f"{_short(b['phase'])} switches ({b['hs']}/{b['ls']})")
                 hz = (m.get("safety") or {}).get("pwm_hz")
                 if hz:
@@ -543,8 +549,13 @@ class _Builder:
         saf, pwm = m.get("safety") or {}, m["pwm"]
         vin, g = self.v_first, self.point(self.gnd)
         out = self.point(bst["out"])
-        ov = saf.get("vout_ov_v") or next((t["threshold"] for t in m.get("trips", [])
-                                           if t.get("unit") == "V"), None)
+        ov_trip = next((t for t in m.get("trips", []) if t.get("unit") == "V"), None)
+        if saf.get("vout_ov_v"):
+            ov, ov_src = saf["vout_ov_v"], "manifest safety.vout_ov_v"
+        elif ov_trip:
+            ov, ov_src = ov_trip["threshold"], f"manifest trips[{ov_trip['name']}].threshold"
+        else:
+            ov = None
         if ov is None:
             self.skip("power-stage", "manifest gives no output over-voltage level "
                                      "(safety.vout_ov_v), so no safe open-loop duty")
@@ -552,8 +563,9 @@ class _Builder:
             return
         d0 = self._open_duty(vin, ov / 2)
         v0 = vin / (1 - d0)
-        d0_src = (f"D0 = 1 - {vin:g} V / ({ov:g} V / 2): half the output over-voltage "
-                  f"level (manifest safety.vout_ov_v), synchronous boost Vout = Vin/(1-D)")
+        d0_src = (f"D0 = 1 - {vin:g} V / ({ov:g} V / 2), kept within 0.05 and manifest "
+                  f"pwm.max_duty: half the output over-voltage level ({ov_src}), "
+                  f"synchronous boost Vout = Vin/(1-D)")
         self.human(f"Output open: nothing on {bst['out']}'s connectors. The next steps switch "
                    f"{bst['ic']} at {pwm.get('freq_hz', 0) / 1e6:g} MHz from the {vin:g} V "
                    f"supply; the output reaches {ov:g} V in the over-voltage test. Hands clear.")
@@ -575,7 +587,8 @@ class _Builder:
             self.step("measure", role="psu", quantity="current",
                       expect={"nominal": None, "min": IDLE_FLOOR_A,
                               "max": round(0.9 * self.ilim, 4), "unit": "A"},
-                      derived_from="unloaded and regulating: below 90 % of the limit",
+                      derived_from=f"unloaded and regulating: below 90 % of the {self.ilim:g} A "
+                                   "limit from constraints power[]",
                       text="input current while regulating")
             self.step("console", role="console", send="disarm", expect_re="^OK ",
                       timeout_s=2, derived_from="manifest commands[disarm]")
@@ -588,7 +601,7 @@ class _Builder:
                   expect={"nominal": round(v0, 3), "min": round(v0 * (1 - VOUT_TOL_OPEN), 3),
                           "max": round(v0 * (1 + VOUT_TOL_OPEN), 3), "unit": "V"},
                   derived_from=f"duty to Vout: {vin:g} V / (1 - {d0:g}) = {v0:.2f} V "
-                               f"+/-{VOUT_TOL_OPEN * 100:g} %",
+                               f"+/-{VOUT_TOL_OPEN * 100:g} %, D0 from {ov_src}",
                   text=f"{_short(bst['out'])} follows the duty")
         outs = {o.get("role"): o.get("net") for o in pwm.get("outputs", [])}
         lo = self.point(self._net(outs.get("hrtim_lo")) or bst["sw"])
@@ -608,7 +621,8 @@ class _Builder:
                   points={"plus": lo, "minus": g}, screenshot=True,
                   expect={"nominal": d0, "min": round(d0 - DUTY_TOL, 3),
                           "max": round(d0 + DUTY_TOL, 3), "unit": ""},
-                  derived_from=f"commanded duty {d0:g} +/-{DUTY_TOL:g} (the low side is on for D)",
+                  derived_from=f"D0 = {d0:g} from {ov_src}, as commanded with manifest "
+                               f"commands[duty], +/-{DUTY_TOL:g} (the low side is on for D)",
                   text=f"{_short(lo['net'])} duty")
         if dt:
             self.step("scope", role="scope", channel=1, channel2=2, quantity="deadtime",
@@ -707,7 +721,10 @@ class _Builder:
         self.step("measure", role="psu", quantity="current",
                   expect={"nominal": None, "min": IDLE_FLOOR_A,
                           "max": round(0.9 * SPIN_ILIMIT_A, 3), "unit": "A"},
-                  derived_from="spinning below 90 % of the limit", text="spin current")
+                  derived_from=f"procgen default SPIN_ILIMIT_A: spinning below 90 % of the "
+                               f"{SPIN_ILIMIT_A:g} A first-spin limit; no design input gives "
+                               "a spin current yet",
+                  text="spin current")
         self.human("Confirm the motor turns smoothly without noise or stalls.")
         self.step("console", role="console", send="disarm", expect_re="^OK ", timeout_s=2,
                   derived_from="manifest commands[disarm]")
@@ -721,14 +738,14 @@ class _Builder:
             self.stages.pop()
             return
         lo, hi = d.vin_range
-        for v in (lo, hi):
+        for end, v in (("min", lo), ("max", hi)):
             self.step("supply", role="psu", set={"v": v, "i_limit": self.ilim, "output": True},
-                      derived_from=f"requirements VIN {'min' if v == lo else 'max'} {v:g} V")
+                      derived_from=f"requirements VIN {end} {v:g} V")
             self.step("wait", seconds=1.0)
             self.step("measure", role="psu", quantity="current",
                       expect={"nominal": None, "min": IDLE_FLOOR_A,
                               "max": round(0.9 * self.ilim, 4), "unit": "A"},
-                      derived_from="idle current holds across the input range",
+                      derived_from=f"idle current holds at requirements VIN {end} {v:g} V",
                       text=f"idle current at {v:g} V")
         saf = (d.manifest or {}).get("safety", {})
         uv = saf.get("vbus_uv_v")
