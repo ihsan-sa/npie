@@ -53,9 +53,10 @@ def _example(driver: str) -> dict:
 
 @pytest.mark.parametrize("driver", sorted(instruments.LIVE))
 def test_live_driver_refused_without_bench_host(driver, rigged):
-    bench = Bench({"roles": {"x": _example(driver)}})
+    role = instruments.SERVES[driver]
+    bench = Bench({"roles": {role: _example(driver)}})
     with pytest.raises(BenchError, match="NPIE_BENCH_HOST"):
-        bench.role("x")
+        bench.role(role)
 
 
 @pytest.mark.parametrize("driver", sorted(instruments.LIVE))
@@ -81,7 +82,8 @@ def test_door_methods_refused_without_bench_host(rigged, tmp_path):
 def test_live_driver_allowed_on_bench_host(monkeypatch):
     monkeypatch.setenv("NPIE_BENCH_HOST", "1")
     monkeypatch.setitem(instruments.LIVE, "serial", lambda cfg: "opened")
-    assert Bench({"roles": {"x": {"driver": "serial"}}}).role("x").upper() == "OPENED"
+    assert Bench({"roles": {"console": {"driver": "serial"}}}).role("console").upper() \
+        == "OPENED"
 
 
 def _is_door(call: ast.Call) -> bool:

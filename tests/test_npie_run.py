@@ -192,9 +192,24 @@ def test_live_bench_needs_the_bench_host_flag(tmp_path):
     rc, out = _run("start", "--workspace", str(ws), "--bench", str(bench))
     assert rc == 2 and "NPIE_BENCH_HOST" in out["error"]
     assert not (ws / "bringup" / "runs").exists()
-    # with the flag a live run stops at human steps like --hold, and a bench
-    # that binds no DMM aborts at the first measurement, supply turned off
+    # with the flag, a bench that binds none of the procedure's roles is
+    # refused before the run starts
     host = {"NPIE_BENCH_HOST": "1"}
+    rc, out = _run("start", "--workspace", str(ws), "--bench", str(bench), env=host)
+    assert rc == 2 and "bench.yaml can't drive this procedure" in out["error"], out
+    assert "dmm is not bound" in out["error"] and "psu is not bound" in out["error"]
+    assert not (ws / "bringup" / "runs").exists()
+    # every role bound, to addresses that name no instrument: a live run
+    # stops at human steps like --hold, and aborts at the first measurement,
+    # whose DMM won't open, and says the supply, which won't open either,
+    # isn't confirmed off
+    import yaml
+    sys.path.insert(0, str(NPIE))
+    import procedure_gen
+    roles = {r: {**yaml.safe_load(line), "resource": "npie-test-none",
+                 "port": "/nonexistent/npie-test"}
+             for r, line in procedure_gen.BENCH_EXAMPLE.items()}
+    bench.write_text(yaml.safe_dump({"bench": "t", "roles": roles}))
     rc, out = _run("start", "--workspace", str(ws), "--bench", str(bench), env=host)
     assert rc == 1 and out["status"] == "awaiting_human" and out["bench"] == "t"
     run = out["run"]
@@ -206,10 +221,12 @@ def test_live_bench_needs_the_bench_host_flag(tmp_path):
         rc, refused = _run("resume", "--run", run)
         assert rc == 2 and "NPIE_BENCH_HOST" in refused["error"]
         rc, out = _run("resume", "--run", run, env=host)
-    assert rc == 2 and out["status"] == "aborted" and "role 'dmm'" in out["error"]
+    assert rc == 2 and out["status"] == "aborted", out
+    assert "npie-test-none" in out["error"] or "pyvisa is not installed" in out["error"], out
     assert out["cursor"] == "unpowered.03"
     assert out["safe_state"].startswith("supply not confirmed off")
-    assert "role 'psu'" in out["safe_state"]
+    unopened = "npie-test-none" if "npie-test-none" in out["error"] else "pyvisa"
+    assert unopened in out["safe_state"], out["safe_state"]
 
 
 def test_fault_flags_need_dry_run(tmp_path):

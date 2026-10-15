@@ -928,6 +928,27 @@ LIVE = {"scpi-psu": ScpiPsu, "scpi-dmm": ScpiDmm, "scpi-scope": ScpiScope,
         "fwe-pwm8": fwe_pwm8, "swd": SwdProbe}
 SIM = {"psu": SimPsu, "dmm": SimDmm, "scope": SimScope, "logic": SimLogic,
        "console": SimConsole, "probe": SimProbe, "pwm": _sim_pwm, "awg": _sim_awg}
+# the role each live driver speaks: the runner calls a role's methods with
+# its sim twin's arguments, so a driver bound to another role fails mid-run
+SERVES = {"scpi-psu": "psu", "scpi-dmm": "dmm", "scpi-scope": "scope", "sigrok": "logic",
+          "serial": "console", "swd": "probe", "fwe-pwm8": "pwm", "scpi-sdg": "awg"}
+
+
+def bench_problems(cfg: dict, roles) -> list[str]:
+    """Why a live bench.yaml can't drive a procedure that uses `roles`: a
+    role it leaves out, or binds to a driver npie lacks or that speaks
+    another role. Empty when every role is bound to its own driver."""
+    out, bound = [], (cfg or {}).get("roles") or {}
+    for r in sorted(roles):
+        rc = bound.get(r)
+        drv = rc.get("driver") if isinstance(rc, dict) else None
+        if not rc:
+            out.append(f"{r} is not bound")
+        elif drv not in LIVE:
+            out.append(f"{r}: unknown driver {drv!r}")
+        elif SERVES[drv] != r:
+            out.append(f"{r}: driver {drv} is a {SERVES[drv]} driver")
+    return out
 
 
 class _Named:
@@ -1054,6 +1075,9 @@ class Bench:
                 drv = LIVE.get(rc.get("driver"))
                 if drv is None:
                     raise BenchError(f"unknown driver {rc.get('driver')!r} for {name}")
+                if SERVES[rc["driver"]] != name:
+                    raise BenchError(f"{name}: driver {rc['driver']} is a "
+                                     f"{SERVES[rc['driver']]} driver")
                 _bench_host(f"the {rc.get('driver')} driver for {name}")
                 addr = _address(rc)
                 new = addr not in self._held
