@@ -12,8 +12,9 @@ as in `manifest commands[duty]`, `manifest safety.vout_ov_v`, `constraints
 voltages[+3V3]`, `requirements VIN` or `netlist U3`. That is still only a
 format check, so a reviewer has to confirm that the named field really gives
 the limit. A limit that comes from a procgen constant and nothing in the
-design says `procgen default` and is listed in RULE_ONLY. The goal is done
-when RULE_ONLY is empty.
+design says `procgen default`, and fails here unless RULE_ONLY lists it.
+RULE_ONLY is empty: the bench limits no other input gives (short floors,
+spin current) come from constraints `bringup{}`.
 """
 from __future__ import annotations
 
@@ -40,8 +41,9 @@ DESIGN_INPUT_RE = re.compile(
     r"|\bnetlist [A-Z+/][\w+/*-]*"
     r"|\bBOM [A-Z]+\d")
 # limits that are procgen constants with nothing in the design behind them yet,
-# by step text
-RULE_ONLY = re.compile(r" to GND is not a short$|^spin current$")
+# by step text (the short floors and spin current now come from constraints
+# bringup{}, which the fixture carries)
+RULE_ONLY: tuple[str, ...] = ()
 EVN_BLOCK = {"topology": "board-to-board-header", "block": "B1",
              "name": "J9 2x20 2.54 male to EVN JP8", "operating_point": {"vio_v": 3.3}}
 
@@ -103,11 +105,54 @@ def test_every_limit_names_its_design_input(tmp_path, variant):
               if s.get("expect") or s.get("fields")):
         src = s.get("derived_from") or ""
         if "procgen default" in src:
-            if not RULE_ONLY.search(s.get("text") or ""):
+            if not any(re.search(r, s.get("text") or "") for r in RULE_ONLY):
                 untraced.append(f"{s['id']} {s.get('text')!r}: {src!r} (not in RULE_ONLY)")
         elif not DESIGN_INPUT_RE.search(src):
             untraced.append(f"{s['id']} {s.get('text')!r}: {src!r}")
     assert not untraced, "limits that name no design input:\n" + "\n".join(untraced)
+
+
+def _bringup(ws: Path, bringup: dict | None) -> None:
+    cp = ws / "kicad" / "constraints.json"
+    c = json.loads(cp.read_text())
+    if bringup is None:
+        c.pop("bringup", None)
+    else:
+        c["bringup"] = bringup
+    cp.write_text(json.dumps(c))
+
+
+def _limit(proc: dict, text: str) -> dict:
+    return next(s for st in proc["stages"] for s in st["steps"] if s.get("text") == text)
+
+
+def test_short_floors_and_spin_current_come_from_constraints_bringup(tmp_path):
+    ws = tmp_path / "mini-bldc"
+    shutil.copytree(FIX, ws)
+    _spin(ws)
+    _bringup(ws, {"short_floor_power_ohm": 2200, "short_floor_logic_ohm": 330,
+                  "spin_current_a": 0.5})
+    proc = procgen.generate(design.load(ws))
+    vm, v33 = _limit(proc, "VM_IN to GND is not a short"), _limit(proc, "+3V3 to GND is not a short")
+    assert vm["expect"]["min"] == 2200 and "bringup[short_floor_power_ohm]" in vm["derived_from"]
+    assert v33["expect"]["min"] == 330 and "bringup[short_floor_logic_ohm]" in v33["derived_from"]
+    spin = _limit(proc, "spin current")
+    assert spin["expect"]["max"] == 0.45 and "bringup[spin_current_a]" in spin["derived_from"]
+
+
+def test_without_bringup_the_defaults_say_so(tmp_path):
+    ws = tmp_path / "mini-bldc"
+    shutil.copytree(FIX, ws)
+    _spin(ws)
+    _bringup(ws, None)
+    proc = procgen.generate(design.load(ws))
+    for text, const, v in (("VM_IN to GND is not a short", "R_FLOOR_POWER", 1000),
+                           ("+3V3 to GND is not a short", "R_FLOOR_LOGIC", 100)):
+        s = _limit(proc, text)
+        assert s["expect"]["min"] == v and f"procgen default {const}" in s["derived_from"]
+    spin = _limit(proc, "spin current")
+    assert spin["expect"]["max"] == 0.9
+    assert "procgen default SPIN_ILIMIT_A" in spin["derived_from"]
 
 
 def test_the_boost_variant_reaches_every_power_stage_check(tmp_path):

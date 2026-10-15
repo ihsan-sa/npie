@@ -18,7 +18,7 @@ editing any of it:
 | Input | Used for |
 |---|---|
 | `kicad/<board>.net` | nets, parts on each net, test points, connectors, the SWD/UART pinouts |
-| `kicad/constraints.json` | `voltages[]` (rail nominals), `power[]` (design currents per rail), `blocks[]` (the EVN header, section 2) |
+| `kicad/constraints.json` | `voltages[]` (rail nominals), `power[]` (design currents per rail), `blocks[]` (the EVN header, section 2), `bringup{}` (the bench limits nothing else in the design gives: `short_floor_power_ohm`, `short_floor_logic_ohm`, `spin_current_a`) |
 | `fab/BOM.csv` | values of the parts a step names (fuse ratings, LED colours) |
 | `requirements.md` | the operating range (VM min/max) when constraints does not carry it |
 | `firmware/fwe-manifest.json` | flash command, UART protocol, test hooks, safety limits (/fwe's contract, schema `fwe-manifest/1`) |
@@ -53,8 +53,10 @@ each limit comes from:
    fine-pitch ICs, the part number silk. Confirmed by a person.
 2. **unpowered** - DMM resistance from every rail net to GND, from input
    to GND, and between power-stage nodes. Limit: above a floor that rules
-   out a short (default 100 ohm for logic rails, 1 kohm for the input and
-   stage nets, whose bulk capacitors make the reading climb). Diode-mode
+   out a short, from constraints `bringup.short_floor_logic_ohm` for logic
+   rails and `bringup.short_floor_power_ohm` for the input and stage nets,
+   whose bulk capacitors make the reading climb (without them 100 ohm and
+   1 kohm, and `derived_from` says `procgen default`). Diode-mode
    checks where the netlist shows a body diode across two probe points
    (phase -> VM, GND -> phase on a half-bridge): 0.3-0.8 V. An integrated
    GaN half-bridge IC (a U with SW/HS, VIN and HI/LI pins, the LMG2100) has
@@ -105,7 +107,9 @@ each limit comes from:
    `disarm`. Idle, the rails stage expects the boost output at the supply
    setpoint less up to 3 V (the high side's reverse conduction).
 9. **full-function** - motor connected, low duty, current limit held; a
-   person confirms rotation and the supply current stays under the limit.
+   person confirms rotation and the supply current stays under 90 % of the
+   limit, constraints `bringup.spin_current_a` (without it 1 A, said as a
+   `procgen default`).
 10. **limits** - operating range corners (VM min and max from the
    requirements), under-voltage trip from the manifest's `vbus_uv_v`
    (expect the fault event within +/-0.5 V); on a firmware with a `pwm`
