@@ -22,6 +22,13 @@ Filed by runs. Each says what done looks like as something a run can check, and 
 - **Done when:** #19 is merged into main; on main, the amp matcher in `skill/scripts/npielib/procgen.py` accepts TAS5825M, TAS5825P, TAS5828M, TPA3245 and TPA3255; a test in `tests/test_npie_usb_first.py` generates the USB-first plan for a board whose amp is one of the three new parts; and `make check` passes on main.
 - **Pull requests:** none landed yet; the work is [#19](https://github.com/ihsan-sa/npie/pull/19) itself.
 
+### CI compiles every report to a PDF
+
+- **Serves:** Every run on record
+- **Done when:** `make check VENV=/home/dispatch-w-npie/venvs/npie` passes with `tests/test_npie_run_report.py` finding that `.github/workflows/check.yml` installs `texlive-luatex` and runs `make check` with `NPIE_REQUIRE_PDF: "1"`, and failing, not skipping, when that is set on a host without lualatex; and the `check` workflow passes on main with it, so each ended run in the report tests has a `report.pdf` that starts `%PDF-`.
+- **Status:** open
+- **Pull requests:** the PR from `dispatch/53` (no host that runs the checks had lualatex, CI included, so every PDF assertion skipped and no check had ever compiled a report. CI now installs TeX Live and sets `NPIE_REQUIRE_PDF=1`. This PR's own CI run is the first compile, and if it is green on main, the goal is done).
+
 ## Later
 
 Goals waiting for an open slot. When a proposed goal closes, the run that closed it moves the top one here up into Proposed goals as open.
@@ -53,6 +60,7 @@ What has landed, from the git history (a line per PR). A proposed goal that clos
 - [#46](https://github.com/ihsan-sa/npie/pull/46) Abort and report a run on SIGTERM or SIGHUP, not just Ctrl-C
 - [#48](https://github.com/ihsan-sa/npie/pull/48) Name every number in a procgen limit so the nudge reaches it
 - [#50](https://github.com/ihsan-sa/npie/pull/50) Reach the boost idle drop and close the fixture-reach goal
+- [#52](https://github.com/ihsan-sa/npie/pull/52) Close the loose-number goal in GOALS.md and add run notes
 
 ### Every limit names its design input
 
@@ -122,4 +130,4 @@ What has landed, from the git history (a line per PR). A proposed goal that clos
 - **Serves:** Limits from the design
 - **Done when:** `make check VENV=/home/dispatch-w-npie/venvs/npie` passes with `tests/test_npie_limit_fields.py` reading procgen's source and finding no number other than 0 and 1 outside its module constants (round()'s digits, f-string formatting, subscripts and the timing and channel keywords of a step aside), except those in its `ARITHMETIC` list, and with `UNDISCLOSED` and `UNREACHED` still empty; and with `tests/test_npie_limit_trace.py` finding that an EVN header with no `vio_v` gives limits that say `procgen default`.
 - **Status:** done
-- **Pull requests:** the PR from `dispatch/51` (the #48 scan looked only inside limit dicts, but numbers outside them still set limits. These were the setpoint's VIN min + 2 V and half-rating fallback, the first current limit's 2x load and 0.05 A floor, the open-loop duty's 0.05 floor and 0.9 max fallback, and D0's aim at half the over-voltage level. The EVN header's 3.3 V `vio_v` fallback also said `constraints blocks[...] vio_v`, as if the design gave it. The vbus reading and a rail following the input never printed the setpoint they're checked against. Each number is now a constant: the nudge finds each of the eight above move a limit that names it, the fallbacks and the duty floor through two new variants, `fallbacks` and `boost-low`. Four set no limit (`OV_AIM_RATING_FRAC`, `VDDA_DEFAULT_V`, `SPIN_V_DEFAULT`, `UV_UNDERSHOOT_V`) and are `NOT_A_LIMIT`. A missing `vio_v` or `pwm.max_duty` now says `procgen default`).
+- **Pull requests:** [#52](https://github.com/ihsan-sa/npie/pull/52) (the #48 scan looked only inside limit dicts, but numbers outside them still set limits. These were the setpoint's VIN min + 2 V and half-rating fallback, the first current limit's 2x load and 0.05 A floor, the open-loop duty's 0.05 floor and 0.9 max fallback, and D0's aim at half the over-voltage level. The EVN header's 3.3 V `vio_v` fallback also said `constraints blocks[...] vio_v`, as if the design gave it. The vbus reading and a rail following the input never printed the setpoint they're checked against. Each number is now a constant: the nudge finds each of the eight above move a limit that names it, the fallbacks and the duty floor through two new variants, `fallbacks` and `boost-low`. Four set no limit (`OV_AIM_RATING_FRAC`, `VDDA_DEFAULT_V`, `SPIN_V_DEFAULT`, `UV_UNDERSHOOT_V`) and are `NOT_A_LIMIT`. A missing `vio_v` or `pwm.max_duty` now says `procgen default`).

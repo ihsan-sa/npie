@@ -12,4 +12,13 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
+      # lualatex and the packages housestyle.sty loads, so every report the
+      # tests write is compiled to a PDF here (the fonts are vendored).
+      - run: >-
+          sudo apt-get update -q &&
+          sudo apt-get install -y -q --no-install-recommends
+          texlive-luatex texlive-latex-recommended texlive-latex-extra
+          texlive-pictures fonts-lmodern lmodern
       - run: make check
+        env:
+          NPIE_REQUIRE_PDF: "1"

@@ -1,7 +1,8 @@
 # make check: the test suite against the simulated bench only.
 # NPIE_BENCH_HOST is cleared, so no test can open a real instrument; real
 # instruments stay on the bench host. The suite needs no network; only
-# building .venv (pip install) does, once.
+# building .venv (pip install) does, once. Report PDFs are built where
+# lualatex is on PATH; NPIE_REQUIRE_PDF=1 (CI sets it) fails without it.
 PYTHON ?= python3
 VENV   := .venv
 PY     := $(VENV)/bin/python
