@@ -12,7 +12,7 @@ lint:
 	$(PYTHON) -m compileall -q skill tests
 
 check: lint $(VENV)/.installed
-	env -u NPIE_BENCH_HOST $(PY) -m pytest -q tests
+	env -u NPIE_BENCH_HOST $(PY) -m pytest -q --durations=10 tests
 
 $(VENV)/.installed: requirements.txt
 	test -x $(PY) || $(PYTHON) -m venv $(VENV)

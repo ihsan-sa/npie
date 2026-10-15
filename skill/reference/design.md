@@ -20,7 +20,7 @@ editing any of it:
 | `kicad/<board>.net` | nets, parts on each net, test points, connectors, the SWD/UART pinouts |
 | `kicad/constraints.json` | `voltages[]` (rail nominals), `power[]` (design currents per rail), `blocks[]` (the EVN header, section 2), `bringup{}` (the bench limits nothing else in the design gives: `short_floor_power_ohm`, `short_floor_logic_ohm`, `spin_current_a`) |
 | `fab/BOM.csv` | values of the parts a step names (fuse ratings, LED colours) |
-| `requirements.md` | the operating range (VM min/max) when constraints does not carry it |
+| `requirements.md` | the operating range (VM min/max), the first on one line as `8-24 V operating` or `Operating input: 8-24 V` (any dash, `to` or `..`; `V` or `VDC`, on one number or both) |
 | `firmware/fwe-manifest.json` | flash command, UART protocol, test hooks, safety limits (/fwe's contract, schema `fwe-manifest/1`) |
 
 Writes, all under `<board>/bringup/`:

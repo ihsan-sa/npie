@@ -14,7 +14,8 @@ stripped name (`S`, `D`, `REF1`), never the raw string.
 hwde writes the clearance voltage there: VM and the phases carry 45 V (the TVS
 clamp) on a 10-28 V board, bootstrap nets 57 V. Regulated rails carry their
 nominal. So a rail rated like the input follows the supply setpoint, and the
-operating range comes from requirements.md ("10-28 V operating").
+operating range comes from requirements.md ("10-28 V operating"; an en dash,
+"to" or "Operating input: 10-28 V" read too).
 
 ## 2026-09-29 [netlist] hwde's `lib` package name collides
 hwde's scripts import `lib`; npie's package is `npielib` so a pytest session that
