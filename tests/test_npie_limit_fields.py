@@ -37,7 +37,7 @@ if str(NPIE) not in sys.path:
 
 from npielib import design, instruments, procgen  # noqa: E402
 from test_npie_limit_trace import (FIX, _boost, _bringup, _evn_header,  # noqa: E402
-                                   _hall, _mini_bldc, _no_manifest, _spin)
+                                   _hall, _mini_bldc, _no_manifest, _rails, _spin)
 
 
 def _defaults(ws: Path) -> None:
@@ -47,7 +47,8 @@ def _defaults(ws: Path) -> None:
     _bringup(ws, None)
 
 
-VARIANTS = [_mini_bldc, _no_manifest, _evn_header, _spin, _boost, _hall, _defaults]
+VARIANTS = [_mini_bldc, _no_manifest, _evn_header, _spin, _boost, _hall, _defaults,
+            _rails]
 NUDGE = 1.37
 # (constant, step text) where the constant moves the limit and derived_from
 # doesn't say so
@@ -57,7 +58,7 @@ UNDISCLOSED: set[tuple[str, str]] = set()
 NOT_A_LIMIT = {"OVP_OVERSHOOT", "INJECT_R_OHM", "INJECT_ILIM_A", "TRIP_SETTLE_S"}
 # limit constants no fixture variant reaches yet, so nothing shows the limit
 # names them; to be emptied by variants that reach them
-UNREACHED = {"TOL_ASYNC", "FOLLOW_TOL", "BOOST_IDLE_DROP_V", "EFFICIENCY"}
+UNREACHED = {"BOOST_IDLE_DROP_V"}
 
 
 def _constants() -> list[str]:
