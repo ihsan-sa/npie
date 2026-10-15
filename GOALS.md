@@ -69,6 +69,7 @@ What has landed, from the git history (a line per PR). A proposed goal that clos
 - [#64](https://github.com/ihsan-sa/npie/pull/64) Hold every supply setpoint to the input's rated voltage
 - [#67](https://github.com/ihsan-sa/npie/pull/67) Write the report PDF for a run waiting on a person too
 - [#69](https://github.com/ihsan-sa/npie/pull/69) Read the VIN range however requirements.md writes it
+- [#71](https://github.com/ihsan-sa/npie/pull/71) Refuse an override the runner can't hold a step to
 
 ### Every limit names its design input
 
@@ -194,4 +195,11 @@ What has landed, from the git history (a line per PR). A proposed goal that clos
 - **Serves:** Limits from the design
 - **Done when:** `make check VENV=/home/dispatch-w-npie/venvs/npie` passes with `tests/test_npie_overrides.py` finding procgen refuse, naming the step, each override in its `REFUSED` list (a key the runner doesn't check, such as `mx` or `unit`, or `min` on a logic step; a value that isn't a finite number: null, `5.2 V`, true, nan, inf; an empty override; a min above the max; a nominal outside them), `procedure_gen.py` exit 2 on one without writing `procedure.json`, and every limit of every fixture variant of `tests/test_npie_limit_fields.py` accepted unchanged as its own override.
 - **Status:** done
-- **Pull requests:** the PR from `dispatch/70` (`bringup/overrides.yaml` is the one way a person, not the design, sets a limit, and procgen merged whatever it held into `expect`. A misspelt `mx: 5.2` left the generated max in force while the report called the step overridden. `max: null` dropped the bound, so any reading passed. `max: 5.2 V` reached the runner as a string and aborted the run at that step on the bench. `{}` was recorded as an override, and a min above the max failed every reading. `procgen._override_error` now refuses each, naming the step).
+- **Pull requests:** [#71](https://github.com/ihsan-sa/npie/pull/71) (`bringup/overrides.yaml` is the one way a person, not the design, sets a limit, and procgen merged whatever it held into `expect`. A misspelt `mx: 5.2` left the generated max in force while the report called the step overridden. `max: null` dropped the bound, so any reading passed. `max: 5.2 V` reached the runner as a string and aborted the run at that step on the bench. `{}` was recorded as an override, and a min above the max failed every reading. `procgen._override_error` now refuses each, naming the step).
+
+### Every limit is in the procedure a person follows
+
+- **Serves:** Limits from the design
+- **Done when:** `make check VENV=/home/dispatch-w-npie/venvs/npie` passes with `tests/test_npie_procedure_md.py` rendering procedure.md for every fixture variant of `tests/test_npie_limit_fields.py` and finding each step in exactly one four-cell table row whose From cell is its `derived_from` and, for each step with `expect` or `fields`, whose Limit cell holds every bound and unit of its `expect` and of each console field, by the field's name; and a manifest banner regex with a `|` in it still giving that step one four-cell row with the whole regex in it.
+- **Status:** done
+- **Pull requests:** the PR from `dispatch/72` (procedure.md, the page a person follows at the bench, printed only `expect`, so a console step checked by `fields` (the firmware's vbus reading, the closed-loop Vout, the OVP and OCP trips' `outputs_on`) had an empty Limit cell, which #56 had fixed in the report but not here. A `|` in a manifest regex, such as `^(fwe mini|fwe boot) `, split its row into five cells, so the regex was cut in two and the From column shifted. `render.step_limit_text` now prints each field's limit by name, and each cell escapes `|`. With the render change stashed, 11 of the 12 new tests fail).

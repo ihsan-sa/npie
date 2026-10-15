@@ -24,6 +24,18 @@ def limit_text(e: dict | None) -> str:
     return (s + (f" (nominal {_num(nom)})" if nom is not None else "")).strip()
 
 
+def step_limit_text(s: dict) -> str:
+    """A step's whole limit: its expect and each console field's, by name."""
+    parts = [limit_text(s["expect"])] if s.get("expect") else []
+    parts += [f"{k}: {limit_text(e)}" for k, e in (s.get("fields") or {}).items()]
+    return "; ".join(parts)
+
+
+def _cell(x) -> str:
+    """A table cell: a '|' (a manifest regex's alternation) would split the row."""
+    return str(x).replace("|", r"\|")
+
+
 def step_text(s: dict) -> str:
     t = s["type"]
     if t == "human":
@@ -73,7 +85,7 @@ def procedure_md(proc: dict) -> str:
     for st in proc["stages"]:
         L += [f"## {st['title']}", "", "| Step | Action | Limit | From |", "|---|---|---|---|"]
         for s in st["steps"]:
-            L.append(f"| {s['id']} | {step_text(s)} | {limit_text(s.get('expect'))} | "
-                     f"{s.get('derived_from', '')} |")
+            L.append(f"| {_cell(s['id'])} | {_cell(step_text(s))} | {_cell(step_limit_text(s))} | "
+                     f"{_cell(s.get('derived_from', ''))} |")
         L.append("")
     return "\n".join(L).replace("±", "+/-") + "\n"
