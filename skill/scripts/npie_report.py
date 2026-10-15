@@ -10,7 +10,9 @@ per stage, every measured step with its limits, value and verdict, every
 human step with who confirmed it and when, the skipped stages with their
 reasons, and the scope captures as figures. A failed, aborted or unfinished
 run still gets a report; its first page says so and names the step it
-stopped at and the safe state it left.
+stopped at and the safe state it left. npie_run.py calls write() itself
+whenever a run stops, so this script is for a rebuild or a run still
+waiting on a person.
 
 Set in pdf-material-builder's house style: housestyle.sty used by path
 (NPIE_HOUSE_STYLE, else the copy vendored in reference/house-style beside
@@ -210,23 +212,17 @@ def compile_pdf(tex: Path, engine: str, style: Path) -> str | None:
     return None
 
 
-def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("--run", required=True)
-    ap.add_argument("--tex-only", action="store_true")
-    a = ap.parse_args(argv)
-    rdir = Path(a.run).expanduser().resolve()
-    try:
-        run = json.loads((rdir / "run.json").read_text(encoding="utf-8"))
-        proc = json.loads((rdir / "procedure.json").read_text(encoding="utf-8"))
-    except (OSError, ValueError) as exc:
-        print(json.dumps({"ok": False, "error": f"not a run dir: {exc}"}))
-        return 2
+def write(rdir: Path, tex_only: bool = False, why_tex_only: str = "--tex-only") -> dict:
+    """report.tex, then report.pdf unless tex_only -> {ok, run, status, tex,
+    pdf, warnings}. Raises OSError / ValueError on a dir that is not a run;
+    npie_run.py calls this whenever a run stops."""
+    run = json.loads((rdir / "run.json").read_text(encoding="utf-8"))
+    proc = json.loads((rdir / "procedure.json").read_text(encoding="utf-8"))
     tex = rdir / "report.tex"
     tex.write_text(build_tex(rdir, run, proc), encoding="ascii")
     warn = []
-    if a.tex_only:
-        warn.append("--tex-only: no PDF built")
+    if tex_only:
+        warn.append(f"{why_tex_only}: no PDF built")
     elif not lualatex():
         warn.append("lualatex not found (set NPIE_LUALATEX)")
     elif not house_style():
@@ -237,9 +233,22 @@ def main(argv=None) -> int:
             warn.append(why)
     pdf = tex.with_suffix(".pdf")
     ok = not warn and pdf.is_file()
-    print(json.dumps({"ok": ok, "run": str(rdir), "status": run["status"], "tex": str(tex),
-                      "pdf": str(pdf) if ok else None, "warnings": warn}, indent=1))
-    return 0 if ok else 1
+    return {"ok": ok, "run": str(rdir), "status": run["status"], "tex": str(tex),
+            "pdf": str(pdf) if ok else None, "warnings": warn}
+
+
+def main(argv=None) -> int:
+    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    ap.add_argument("--run", required=True)
+    ap.add_argument("--tex-only", action="store_true")
+    a = ap.parse_args(argv)
+    try:
+        out = write(Path(a.run).expanduser().resolve(), a.tex_only)
+    except (OSError, ValueError) as exc:
+        print(json.dumps({"ok": False, "error": f"not a run dir: {exc}"}))
+        return 2
+    print(json.dumps(out, indent=1))
+    return 0 if out["ok"] else 1
 
 
 if __name__ == "__main__":

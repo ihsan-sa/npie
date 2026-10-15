@@ -22,7 +22,11 @@ which only the bench host sets (reference/bench-hosts.md): the box never
 opens an instrument.
 
 On any failed step or instrument error the supply outputs go off before the
-run stops. Prints JSON {ok, run, status, cursor, awaiting?, failed?, ...}.
+run stops. Whenever start, confirm or resume leaves a run, it writes the
+run's report (npie_report.py): report.tex every time, and report.pdf too once
+the run has ended (passed, failed or aborted), so every run is on record. A
+report that cannot be built is a warning under "report", never the run's
+outcome. Prints JSON {ok, run, status, cursor, awaiting?, failed?, report, ...}.
 Exit 0 passed, 1 failed or awaiting a person (status says which), 2 error or
 refusal (stale procedure, wrong step, aborted on an instrument error).
 """
@@ -38,12 +42,25 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import yaml  # noqa: E402
 
+import npie_report  # noqa: E402
 from npielib import design, runner  # noqa: E402
 
 
 def _out(payload: dict, code: int) -> int:
     print(json.dumps(payload, indent=1))
     return code
+
+
+def _report(run: runner.Run) -> dict:
+    """The run's report as it stands; the PDF only once the run has ended."""
+    waiting = run.rec["status"] in ("running", "awaiting_human")
+    try:
+        r = npie_report.write(run.dir, tex_only=waiting,
+                              why_tex_only="run not ended (npie_report.py --run for one now)")
+    except Exception as exc:     # a report bug must not hide the run's own outcome
+        return {"ok": False, "tex": None, "pdf": None,
+                "warnings": [f"report not written: {type(exc).__name__}: {exc}"]}
+    return {k: r[k] for k in ("ok", "tex", "pdf", "warnings")}
 
 
 def main(argv=None) -> int:
@@ -97,7 +114,10 @@ def main(argv=None) -> int:
                 runner.advance(run)
     except (runner.RunError, design.DesignError, OSError, yaml.YAMLError) as exc:
         return _out({"ok": False, "error": str(exc)}, 2)
-    return _out(runner.summary(run), runner.exit_code(run))
+    out = runner.summary(run)
+    if a.cmd != "status":
+        out["report"] = _report(run)
+    return _out(out, runner.exit_code(run))
 
 
 if __name__ == "__main__":
