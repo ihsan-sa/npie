@@ -34,7 +34,10 @@ the run dir's run.lock): confirm or resume on a run another process is
 driving is refused. A run still "running" that nobody holds was left by a
 process that died with no say (SIGKILL, out of memory, its host went down),
 and the next confirm or resume aborts it, supply off, rather than carry on
-from a step whose outcome is unknown. Whenever start, confirm or resume leaves a run, it writes the
+from a step whose outcome is unknown. One process drives an instrument at a
+time too: a live run holds each instrument's address host-wide while it has
+it open (instruments.Bench), so a second run on the same supply is refused it
+and aborts without touching it. Whenever start, confirm or resume leaves a run, it writes the
 run's report (npie_report.py): report.tex and report.pdf, a run waiting on a
 person included (its report says it has not ended), so every run is on record. A
 report that cannot be built is a warning under "report", never the run's

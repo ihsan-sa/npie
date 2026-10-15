@@ -152,6 +152,9 @@ class Run:
         self._lock = f
 
     def release(self):
+        """Let go of the bench's instruments, then of the run."""
+        if self.bench is not None:
+            self.bench.close()
         f, self._lock = self._lock, None
         if f is None:
             return
