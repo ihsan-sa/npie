@@ -95,7 +95,9 @@ each limit comes from:
    it needs the power-up stage: with no supply setpoint (no input net, or a
    first power above the input's rating) it is skipped, not run on an
    unpowered board.
-7. **blocks** - the manifest's `test_hooks` (unattended), then per-block
+7. **blocks** - the manifest's `test_hooks` (unattended, unless the
+   command a hook sends is not one the manifest marks `safe: true`: then
+   a human step naming what it sends comes first), then per-block
    checks the netlist implies: sense offsets (CSA outputs at mid-supply),
    bus-voltage reading vs the supply setpoint, LEDs and buttons (human),
    Hall/encoder inputs (logic analyser or console), gate drive with no
@@ -126,7 +128,7 @@ each limit comes from:
    requirements), under-voltage trip from the manifest's `vbus_uv_v`
    (expect the fault event within +/-0.5 V); on a firmware with a `pwm`
    block the check runs while switching at D0, because it latches input
-   trips only then. Nothing above the rated
+   trips only then, after a human step saying so. Nothing above the rated
    maximum input is applied; over-voltage tests beyond it are listed as
    not run, with the reason. No supply setpoint in any stage goes above
    the input's rating in constraints `voltages[]` either: a VIN corner or
@@ -158,9 +160,10 @@ number, the merged min not above the max and the nominal between them.
 | `console` | send a line, match the reply (`OK <json>`), check JSON fields against limits | no |
 | `wait` | settle time | no |
 
-A step that energises something risky (`safe: false` manifest commands, the
-first power-up, the motor stage) is always preceded by a `human` step that
-states what is about to happen.
+A step that energises something risky (a manifest command not marked
+`safe: true`, the first power-up, the motor stage) is always preceded by a
+`human` step in its own stage that states what is about to happen
+(`tests/test_npie_announce.py` holds every fixture variant to it).
 
 Probe placement is its own human step, grouped: consecutive measurements on
 the same pair of points share one placement. When a net has no test point,
