@@ -27,7 +27,7 @@ Filed by runs. Each says what done looks like as something a run can check, and 
 - **Serves:** Every run on record
 - **Done when:** `make check VENV=/home/dispatch-w-npie/venvs/npie` passes with `tests/test_npie_run_report.py` finding that `.github/workflows/check.yml` installs `texlive-luatex` and runs `make check` with `NPIE_REQUIRE_PDF: "1"`, and failing, not skipping, when that is set on a host without lualatex; and the `check` workflow passes on main with it, so each ended run in the report tests has a `report.pdf` that starts `%PDF-`.
 - **Status:** open
-- **Pull requests:** the PR from `dispatch/53` (no host that runs the checks had lualatex, CI included, so every PDF assertion skipped and no check had ever compiled a report. CI now installs TeX Live and sets `NPIE_REQUIRE_PDF=1`. This PR's own CI run is the first compile, and if it is green on main, the goal is done).
+- **Pull requests:** [#54](https://github.com/ihsan-sa/npie/pull/54) (no host that runs the checks had lualatex, CI included, so every PDF assertion skipped and no check had ever compiled a report. CI now installs TeX Live and sets `NPIE_REQUIRE_PDF=1`. #54 is merged, but a run can't see CI, so the goal stays open until someone confirms the `check` workflow is green on main).
 
 ## Later
 
@@ -61,6 +61,7 @@ What has landed, from the git history (a line per PR). A proposed goal that clos
 - [#48](https://github.com/ihsan-sa/npie/pull/48) Name every number in a procgen limit so the nudge reaches it
 - [#50](https://github.com/ihsan-sa/npie/pull/50) Reach the boost idle drop and close the fixture-reach goal
 - [#52](https://github.com/ihsan-sa/npie/pull/52) Close the loose-number goal in GOALS.md and add run notes
+- [#54](https://github.com/ihsan-sa/npie/pull/54) Build every report PDF in CI and fail when lualatex is missing
 
 ### Every limit names its design input
 
@@ -131,3 +132,10 @@ What has landed, from the git history (a line per PR). A proposed goal that clos
 - **Done when:** `make check VENV=/home/dispatch-w-npie/venvs/npie` passes with `tests/test_npie_limit_fields.py` reading procgen's source and finding no number other than 0 and 1 outside its module constants (round()'s digits, f-string formatting, subscripts and the timing and channel keywords of a step aside), except those in its `ARITHMETIC` list, and with `UNDISCLOSED` and `UNREACHED` still empty; and with `tests/test_npie_limit_trace.py` finding that an EVN header with no `vio_v` gives limits that say `procgen default`.
 - **Status:** done
 - **Pull requests:** [#52](https://github.com/ihsan-sa/npie/pull/52) (the #48 scan looked only inside limit dicts, but numbers outside them still set limits. These were the setpoint's VIN min + 2 V and half-rating fallback, the first current limit's 2x load and 0.05 A floor, the open-loop duty's 0.05 floor and 0.9 max fallback, and D0's aim at half the over-voltage level. The EVN header's 3.3 V `vio_v` fallback also said `constraints blocks[...] vio_v`, as if the design gave it. The vbus reading and a rail following the input never printed the setpoint they're checked against. Each number is now a constant: the nudge finds each of the eight above move a limit that names it, the fallbacks and the duty floor through two new variants, `fallbacks` and `boost-low`. Four set no limit (`OV_AIM_RATING_FRAC`, `VDDA_DEFAULT_V`, `SPIN_V_DEFAULT`, `UV_UNDERSHOOT_V`) and are `NOT_A_LIMIT`. A missing `vio_v` or `pwm.max_duty` now says `procgen default`).
+
+### Every report shows each limit and where it came from
+
+- **Serves:** Every run on record
+- **Done when:** `make check VENV=/home/dispatch-w-npie/venvs/npie` passes with `tests/test_npie_report_limits.py` building `report.tex` for every fixture variant of `tests/test_npie_limit_fields.py` and finding, for each step with `expect` or `fields`, its whole limit (each console field's included) in its Measurements row and its `derived_from` in its row of "Where each limit came from"; and, dry-running a board with `bringup/overrides.yaml`, a first-page callout naming the overridden step with its limit and the generated one it replaced (and, where lualatex is on the host, the PDF built).
+- **Status:** done
+- **Pull requests:** the PR from `dispatch/55` (the report printed only `expect`, so a console step checked by `fields` (the vbus reading, the closed-loop Vout, a trip's outputs) showed its value with no limit. It skipped every human step in Measurements, so a reading a person typed against a limit (the EVN header's pin voltages) wasn't on record at all. No `derived_from` was in it, so a passed report couldn't show that a person, not the design, had set a limit. Each is now in the report, and a person's override is called out on the first page. The new sections are compiled to PDF first in this PR's CI).

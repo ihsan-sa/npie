@@ -257,10 +257,13 @@ owner's approval list and is not wired by this skill.
 `npie_report.py --run R` builds `report.pdf` in pdf-material-builder's
 house style the way hwde's report_gen does (lualatex, housestyle.sty by
 path, ASCII-only .tex): board and procedure identity (input hashes), a
-summary table per stage, every measured step with expect/actual/verdict,
+summary table per stage, every measured step with expect/actual/verdict
+(a console step's per-field limits included), each limit's `derived_from`,
 the human confirmations with who and when, and the scope captures as
 figures. A failed or incomplete run still gets a report, marked so on its
-first page with the failed step and the safe state it left. lualatex comes
+first page with the failed step and the safe state it left; a limit a person
+set in `bringup/overrides.yaml` is called out on the first page too, beside
+the generated one it replaced. lualatex comes
 from `NPIE_LUALATEX` else PATH and the style from `NPIE_HOUSE_STYLE` else
 pdf-material-builder's skill dir; without either (or `--tex-only`) the
 script writes `report.tex` only and exits 1.

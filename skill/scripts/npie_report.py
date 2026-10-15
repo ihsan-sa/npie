@@ -6,9 +6,12 @@
 Reads <run>/run.json and <run>/procedure.json (npie_run.py writes both) and
 writes <run>/report.tex and <run>/report.pdf: the run's identity (board,
 bench, dates, procedure and firmware hashes, simulated faults), a summary
-per stage, every measured step with its limits, value and verdict, every
+per stage, every measured step with its limits (each console field's too),
+value and verdict, where each limit came from (its `derived_from`), every
 human step with who confirmed it and when, the skipped stages with their
-reasons, and the scope captures as figures. A failed, aborted or unfinished
+reasons, and the scope captures as figures. A limit a person set in
+bringup/overrides.yaml is called out on the first page with the generated
+one it replaced. A failed, aborted or unfinished
 run still gets a report; its first page says so and names the step it
 stopped at and the safe state it left. npie_run.py calls write() itself
 whenever a run stops, so this script is for a rebuild or a run still
@@ -71,6 +74,13 @@ def limits(e: dict | None) -> str:
     return f"{s} {esc(u)}".strip()
 
 
+def step_limits(st: dict) -> str:
+    """A step's whole limit: its expect and each console field's."""
+    parts = [limits(st.get("expect"))] if st.get("expect") else []
+    parts += [f"{esc(k)}: {limits(v)}" for k, v in (st.get("fields") or {}).items()]
+    return "; ".join(parts)
+
+
 def sid(x) -> str:
     """A step id, never hyphenated across lines."""
     return r"\mbox{" + esc(x) + "}"
@@ -105,6 +115,12 @@ def build_tex(rdir: Path, run: dict, proc: dict) -> str:
                  + (". Failed: " + esc(", ".join(fails)) if fails else "")
                  + (". " + esc(why) if why else "") + ". Safe state: "
                  + esc(run.get("safe_state") or "none recorded") + r".\end{hscallout}")
+    if proc.get("overrides"):
+        B.append(r"\begin{hscallout}{Limits set by a person}" + "In bringup/overrides.yaml, not "
+                 "from the design: " + "; ".join(
+                     f"{sid(o['step'])} {limits({**o['generated'], **o['override']})} "
+                     f"(generated {limits(o['generated'])})" for o in proc["overrides"])
+                 + r".\end{hscallout}")
     B.append(r"\begin{hsstatrow}[4]" + "".join(
         r"\hsstat{" + str(v) + "}{" + k + "}" for k, v in
         [("steps passed", npass), ("steps failed", nfail),
@@ -136,8 +152,8 @@ def build_tex(rdir: Path, run: dict, proc: dict) -> str:
 
     rows = []
     for i, (_, st) in steps.items():
-        if st["type"] in ("human", "wait", "supply"):
-            continue
+        if st["type"] in ("human", "wait", "supply") and not (st.get("expect") or st.get("fields")):
+            continue  # a person's typed reading has a limit, so it is a measurement too
         r = got.get(i, {})
         val = r.get("value")
         if isinstance(val, dict):
@@ -146,11 +162,16 @@ def build_tex(rdir: Path, run: dict, proc: dict) -> str:
             val = ", ".join(f"{k}={num(v)}" for k, v in r["fields"].items())
         what = st.get("text") or (st.get("send") and "reply to " + st["send"])
         rows.append([sid(i), esc(what or st.get("quantity") or st["type"]),
-                     limits(st.get("expect")), num(val) + " " + esc(r.get("unit") or ""),
+                     step_limits(st), num(val) + " " + esc(r.get("unit") or ""),
                      esc(r.get("verdict", "not run"))])
     B += [r"\section{Measurements}",
           table(r"p{0.17\linewidth}p{0.31\linewidth}p{0.18\linewidth}p{0.14\linewidth}l",
                 ["Step", "What", "Limits", "Value", "Verdict"], rows)]
+
+    rows = [[sid(i), esc(st.get("derived_from") or "not stated")]
+            for i, (_, st) in steps.items() if st.get("expect") or st.get("fields")]
+    B += [r"\section{Where each limit came from}",
+          table(r"p{0.17\linewidth}p{0.75\linewidth}", ["Step", "Source"], rows)]
 
     rows = [[sid(r["id"]), esc(steps.get(r["id"], (0, {}))[1].get("text", "")),
              esc(r.get("confirmed_by")), esc(r.get("confirmed_at")),
