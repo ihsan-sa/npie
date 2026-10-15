@@ -29,7 +29,12 @@ On any failed step, instrument error, bench that can't be built, Ctrl-C,
 SIGTERM or SIGHUP the supply outputs go off before the run stops (a Ctrl-C or
 signal aborts it, exit 128 + the signal: 130, 143, 129), so no run is left
 "running" behind a dead process: not a killed one, a timed-out job's or a
-dropped ssh session's either. Whenever start, confirm or resume leaves a run, it writes the
+dropped ssh session's either. One process drives a run at a time (it holds
+the run dir's run.lock): confirm or resume on a run another process is
+driving is refused. A run still "running" that nobody holds was left by a
+process that died with no say (SIGKILL, out of memory, its host went down),
+and the next confirm or resume aborts it, supply off, rather than carry on
+from a step whose outcome is unknown. Whenever start, confirm or resume leaves a run, it writes the
 run's report (npie_report.py): report.tex and report.pdf, a run waiting on a
 person included (its report says it has not ended), so every run is on record. A
 report that cannot be built is a warning under "report", never the run's
@@ -123,15 +128,17 @@ def main(argv=None) -> int:
         sub.add_parser(name).add_argument("--run", required=True)
     a = ap.parse_args(argv)
 
-    old = _catch_stop_signals()
+    old, held = _catch_stop_signals(), []
     try:
-        return _main(a)
+        return _main(a, held)
     finally:
+        for r in held:
+            r.release()
         for s, h in old.items():
             signal.signal(s, h)
 
 
-def _main(a) -> int:
+def _main(a, held: list) -> int:
     run = None
     try:
         if a.cmd == "start":
@@ -147,12 +154,19 @@ def _main(a) -> int:
             run = runner.create(Path(a.workspace), bench="sim" if a.dry_run else
                                 cfg.get("bench", "bench"), bench_cfg=cfg, label=a.label,
                                 faults=a.fault, hold=a.hold, seed=a.seed)
+            run.claim()
+            held.append(run)
             runner.advance(run)     # opens the bench, so a bench that can't be built aborts
         else:
             run = runner.Run(Path(a.run))
             if not run.sim and os.environ.get("NPIE_BENCH_HOST") != "1":
                 raise runner.RunError("live bench refused: NPIE_BENCH_HOST=1 is not set")
-            if a.cmd == "confirm":
+            if a.cmd != "status":
+                run.claim()         # refused while another process drives it
+                held.append(run)
+            if a.cmd != "status" and runner.abort_orphaned(run):
+                pass                # its process died mid-step: ended, supply off
+            elif a.cmd == "confirm":
                 # any failed confirmation (--fail or a value out of limits) turns
                 # the supply off; the bench is lazy, so opening it here is free
                 run.open_bench()
