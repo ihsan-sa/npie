@@ -82,6 +82,7 @@ What has landed, from the git history (a line per PR). A proposed goal that clos
 - [#91](https://github.com/ihsan-sa/npie/pull/91) Announce unsafe test hooks and the limits stage's D0 switching
 - [#93](https://github.com/ihsan-sa/npie/pull/93) Refuse --by sim on a live run and a non-finite typed reading
 - [#95](https://github.com/ihsan-sa/npie/pull/95) Close the bench-role goal in GOALS.md and add run notes
+- [#97](https://github.com/ihsan-sa/npie/pull/97) List every firmware protection a procedure doesn't test
 
 ### Every limit names its design input
 
@@ -298,4 +299,11 @@ What has landed, from the git history (a line per PR). A proposed goal that clos
 - **Serves:** Limits from the design
 - **Done when:** `make check VENV=/home/dispatch-w-npie/venvs/npie` passes with `tests/test_npie_protections.py` generating every fixture variant of `tests/test_npie_rated_input.py`, plus an under-voltage trip above VIN min, an over-voltage trip below VIN max, the boost's trips on a board with no boost, an unrated boost output whose max duty can't reach its trip and a trip whose sense net isn't in the netlist, and finding each of the manifest's `safety.vbus_uv_v`, `vbus_ov_v`, `i_trip_a` and `trips[<name>]` named in some step's `derived_from` or in a `skipped` reason (or its whole stage skipped), with procgen raising on none.
 - **Status:** done
-- **Pull requests:** the PR from `dispatch/96` (a procedure is a list of checks and of what it doesn't check, and procgen left protections off both. It tested the under-voltage trip only below VIN min and listed the over-voltage trip only above VIN max, so a trip inside the operating range, a design at odds with itself, went unmentioned. `i_trip_a` appeared nowhere, and a board with manifest `trips[]` but no boost dropped them all. An unrated boost output whose max duty couldn't reach its trip crashed procgen with a `TypeError`. Each is now a `skipped` entry naming the protection. With the procgen change stashed, 20 of the 25 new tests fail).
+- **Pull requests:** [#97](https://github.com/ihsan-sa/npie/pull/97) (a procedure is a list of checks and of what it doesn't check, and procgen left protections off both. It tested the under-voltage trip only below VIN min and listed the over-voltage trip only above VIN max, so a trip inside the operating range, a design at odds with itself, went unmentioned. `i_trip_a` appeared nowhere, and a board with manifest `trips[]` but no boost dropped them all. An unrated boost output whose max duty couldn't reach its trip crashed procgen with a `TypeError`. Each is now a `skipped` entry naming the protection. With the procgen change stashed, 20 of the 25 new tests fail).
+
+### A run leaves its report wherever its board sits
+
+- **Serves:** Every run on record
+- **Done when:** `make check VENV=/home/dispatch-w-npie/venvs/npie` passes with `tests/test_npie_run_report.py::test_a_run_anywhere_on_the_host_leaves_its_report_with_its_captures` dry-running a fixture whose workspace sits under a path with an accent, a space, `#` and `%`, and finding the run's report written (no "report not written" warning), its `report.pdf` built (in the house style where lualatex is), each scope capture drawn by its path from the run dir, and nothing of the host path in `report.tex`.
+- **Status:** done
+- **Pull requests:** the PR from `dispatch/98` (`build_tex` wrote each scope capture's absolute path into `report.tex` unescaped, then checked the `.tex` was ASCII. So a run under a path with an accent in it (a person's name, say) raised there, `npie_run.py` caught it as a warning, and a run that saved a capture, every dry run of the mini-bldc fixture included, ended with no report at all. A `%` or space would have broken the house-style compile instead. lualatex now runs in the run dir and each capture is named from there. With the fix out, the new test fails at "report not written").

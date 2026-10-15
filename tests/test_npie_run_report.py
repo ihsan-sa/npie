@@ -177,6 +177,24 @@ def test_status_does_not_rewrite_the_report(tmp_path):
     assert "report" not in st and not tex.exists()
 
 
+def test_a_run_anywhere_on_the_host_leaves_its_report_with_its_captures(tmp_path):
+    # a board workspace can sit under any path, a person's name with an accent
+    # in it included; the report names each capture from the run dir, so no
+    # character of that path ends up in report.tex
+    where = tmp_path / "José's bench #2 50% done"
+    where.mkdir()
+    rc, out = _run("start", "--workspace", str(_ws(where)), "--dry-run")
+    assert rc == 0, out
+    assert not any(w.startswith("report not written") for w in out["report"]["warnings"]), out
+    tex = _on_record(out, "passed")
+    run = Path(out["run"])
+    caps = sorted(p.relative_to(run).as_posix() for p in (run / "captures").glob("*.png"))
+    assert caps, "the fixture's dry run saves no scope capture"
+    for c in caps:
+        assert r"\hsdiagram[width=\linewidth]{" + c + "}" in tex, c
+    assert str(tmp_path) not in tex
+
+
 def test_a_report_error_does_not_change_the_runs_outcome(tmp_path, monkeypatch, capsys):
     def broken(*a, **k):
         raise KeyError("board")
