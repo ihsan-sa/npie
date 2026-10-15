@@ -3,8 +3,9 @@
 Every limit is derived from a design fact and says which one in the step's
 `derived_from`. The rules, in one place so a wrong limit is fixed here:
 
-- unpowered: resistance to GND above a floor (100 ohm logic rails, 1 kohm the
-  input and power-stage nets), diode mode 0.3-0.8 V across each FET body diode.
+- unpowered: resistance to GND above a floor (constraints bringup
+  short_floor_logic_ohm for logic rails, short_floor_power_ohm for the input
+  and power-stage nets; 100 ohm and 1 kohm when the design sets none), diode mode 0.3-0.8 V across each FET body diode.
 - power-up: supply at VIN min + 2 V, current limit 2x the full-load estimate
   capped at FIRST_ILIMIT_A; idle current between IDLE_FLOOR_A and 90 % of the
   limit (a supply sitting in current limit is a fail).
@@ -110,6 +111,17 @@ class _Builder:
 
     def skip(self, stage: str, reason: str):
         self.skipped.append({"stage": stage, "reason": reason})
+
+    def bench_limit(self, key: str, default: float) -> tuple[float, str]:
+        """A bench limit from constraints bringup{}, else procgen's default -> (value, source)."""
+        v = self.d.bringup.get(key)
+        if v is None:
+            return default, f"procgen default {key} {default:g}; the design sets none"
+        try:
+            v = float(v)
+        except (TypeError, ValueError):
+            raise DesignError(f"constraints bringup.{key} is {v!r}, not a number") from None
+        return v, f"constraints bringup[{key}]={v:g}"
 
     # ---- netlist helpers
 
@@ -240,7 +252,8 @@ class _Builder:
         for n in dict.fromkeys(nets):
             power = n == self.input or any(b["phase"] == n for b in self.bridges) \
                 or any(r["net"] == n and r["follows_input"] for r in self.rails)
-            floor = R_FLOOR_POWER if power else R_FLOOR_LOGIC
+            floor, src = (self.bench_limit("short_floor_power_ohm", R_FLOOR_POWER) if power
+                          else self.bench_limit("short_floor_logic_ohm", R_FLOOR_LOGIC))
             p = self.point(n)
             self.probe("DMM", p, g, "resistance")
             self.step("measure", role="dmm", quantity="resistance",
@@ -248,9 +261,7 @@ class _Builder:
                       expect={"nominal": None, "min": floor, "max": None, "unit": "ohm"},
                       derived_from=f"short check {_short(n)}-GND, a "
                                    f"{'power net' if power else 'logic rail'} by the netlist "
-                                   f"and constraints: procgen default "
-                                   f"{'R_FLOOR_POWER' if power else 'R_FLOOR_LOGIC'} "
-                                   f"{floor:g} ohm",
+                                   f"and constraints: {src} ohm",
                       text=f"{_short(n)} to GND is not a short")
         for b in self.bridges:
             if b.get("ic"):
@@ -709,10 +720,11 @@ class _Builder:
             self.stages.pop()
             return
         v = getattr(self, "v_first", 12.0)
+        ilim, src = self.bench_limit("spin_ilimit_a", SPIN_ILIMIT_A)
         self.human("Motor connected to the phase outputs, shaft free and clamped. "
-                   f"The next steps spin it at {v:g} V with a {SPIN_ILIMIT_A:g} A limit.")
-        self.step("supply", role="psu", set={"v": v, "i_limit": SPIN_ILIMIT_A, "output": True},
-                  derived_from=f"first spin: {SPIN_ILIMIT_A:g} A limit, low load")
+                   f"The next steps spin it at {v:g} V with a {ilim:g} A limit.")
+        self.step("supply", role="psu", set={"v": v, "i_limit": ilim, "output": True},
+                  derived_from=f"first spin, low load: {src} A")
         self.step("console", role="console", send="arm", expect_re="^OK ", timeout_s=2,
                   derived_from="manifest commands[arm] safe:false")
         self.step("console", role="console", send="spin", expect_re="^OK ", timeout_s=2,
@@ -720,10 +732,8 @@ class _Builder:
         self.step("wait", seconds=3.0)
         self.step("measure", role="psu", quantity="current",
                   expect={"nominal": None, "min": IDLE_FLOOR_A,
-                          "max": round(0.9 * SPIN_ILIMIT_A, 3), "unit": "A"},
-                  derived_from=f"procgen default SPIN_ILIMIT_A: spinning below 90 % of the "
-                               f"{SPIN_ILIMIT_A:g} A first-spin limit; no design input gives "
-                               "a spin current yet",
+                          "max": round(0.9 * ilim, 3), "unit": "A"},
+                  derived_from=f"spinning below 90 % of the first-spin limit, {src} A",
                   text="spin current")
         self.human("Confirm the motor turns smoothly without noise or stalls.")
         self.step("console", role="console", send="disarm", expect_re="^OK ", timeout_s=2,

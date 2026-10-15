@@ -11,9 +11,9 @@ A bare input name is not enough: `derived_from` has to point into the input,
 as in `manifest commands[duty]`, `manifest safety.vout_ov_v`, `constraints
 voltages[+3V3]`, `requirements VIN` or `netlist U3`. That is still only a
 format check, so a reviewer has to confirm that the named field really gives
-the limit. A limit that comes from a procgen constant and nothing in the
-design says `procgen default` and is listed in RULE_ONLY. The goal is done
-when RULE_ONLY is empty.
+the limit. A limit that comes from a procgen constant because the design
+sets none says `procgen default`, and fails here: the fixture's constraints
+carry a `bringup` block for the short-check floors and the spin current.
 """
 from __future__ import annotations
 
@@ -39,9 +39,6 @@ DESIGN_INPUT_RE = re.compile(
     r"|\brequirements VIN\b"
     r"|\bnetlist [A-Z+/][\w+/*-]*"
     r"|\bBOM [A-Z]+\d")
-# limits that are procgen constants with nothing in the design behind them yet,
-# by step text
-RULE_ONLY = re.compile(r" to GND is not a short$|^spin current$")
 EVN_BLOCK = {"topology": "board-to-board-header", "block": "B1",
              "name": "J9 2x20 2.54 male to EVN JP8", "operating_point": {"vio_v": 3.3}}
 
@@ -102,12 +99,60 @@ def test_every_limit_names_its_design_input(tmp_path, variant):
     for s in (s for st in proc["stages"] for s in st["steps"]
               if s.get("expect") or s.get("fields")):
         src = s.get("derived_from") or ""
-        if "procgen default" in src:
-            if not RULE_ONLY.search(s.get("text") or ""):
-                untraced.append(f"{s['id']} {s.get('text')!r}: {src!r} (not in RULE_ONLY)")
-        elif not DESIGN_INPUT_RE.search(src):
+        if "procgen default" in src or not DESIGN_INPUT_RE.search(src):
             untraced.append(f"{s['id']} {s.get('text')!r}: {src!r}")
     assert not untraced, "limits that name no design input:\n" + "\n".join(untraced)
+
+
+def _bringup(ws: Path, block: dict | None) -> None:
+    cp = ws / "kicad" / "constraints.json"
+    c = json.loads(cp.read_text())
+    c.pop("bringup", None)
+    if block is not None:
+        c["bringup"] = block
+    cp.write_text(json.dumps(c))
+
+
+def _limit_steps(proc: dict) -> dict:
+    steps = [s for st in proc["stages"] for s in st["steps"] if s.get("expect")]
+    return {s["text"]: s for s in steps
+            if s["text"] in ("VM_IN to GND is not a short", "+3V3 to GND is not a short",
+                             "spin current")}
+
+
+def test_the_design_sets_the_short_floors_and_spin_current(tmp_path):
+    ws = tmp_path / "mini-bldc"
+    shutil.copytree(FIX, ws)
+    _spin(ws)
+    _bringup(ws, {"short_floor_power_ohm": 470, "short_floor_logic_ohm": 47,
+                  "spin_ilimit_a": 2.5})
+    by = _limit_steps(procgen.generate(design.load(ws)))
+    assert by["VM_IN to GND is not a short"]["expect"]["min"] == 470
+    assert "constraints bringup[short_floor_power_ohm]=470" in \
+        by["VM_IN to GND is not a short"]["derived_from"]
+    assert by["+3V3 to GND is not a short"]["expect"]["min"] == 47
+    assert by["spin current"]["expect"]["max"] == 2.25
+    assert "constraints bringup[spin_ilimit_a]=2.5" in by["spin current"]["derived_from"]
+
+
+def test_without_a_bringup_block_the_defaults_say_so(tmp_path):
+    ws = tmp_path / "mini-bldc"
+    shutil.copytree(FIX, ws)
+    _spin(ws)
+    _bringup(ws, None)
+    by = _limit_steps(procgen.generate(design.load(ws)))
+    assert by["VM_IN to GND is not a short"]["expect"]["min"] == procgen.R_FLOOR_POWER
+    assert by["+3V3 to GND is not a short"]["expect"]["min"] == procgen.R_FLOOR_LOGIC
+    assert by["spin current"]["expect"]["max"] == round(0.9 * procgen.SPIN_ILIMIT_A, 3)
+    assert all("procgen default" in s["derived_from"] for s in by.values())
+
+
+def test_a_bringup_limit_that_is_not_a_number_is_refused(tmp_path):
+    ws = tmp_path / "mini-bldc"
+    shutil.copytree(FIX, ws)
+    _bringup(ws, {"short_floor_power_ohm": "1k"})
+    with pytest.raises(design.DesignError, match="short_floor_power_ohm"):
+        procgen.generate(design.load(ws))
 
 
 def test_the_boost_variant_reaches_every_power_stage_check(tmp_path):

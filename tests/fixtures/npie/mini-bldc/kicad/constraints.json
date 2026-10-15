@@ -49,5 +49,10 @@
    "current_a": 0.4,
    "pdn": false
   }
- ]
+ ],
+ "bringup": {
+  "short_floor_power_ohm": 1000,
+  "short_floor_logic_ohm": 100,
+  "spin_ilimit_a": 1.0
+ }
 }
