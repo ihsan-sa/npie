@@ -279,11 +279,12 @@ alone and exits 1.
 
 `npie_run.py` calls the same builder whenever `start`, `confirm` or `resume`
 leaves a run, so no run goes unrecorded for want of someone asking: the
-`.tex` every time, the PDF once the run has ended (passed, failed or
-aborted), and its JSON says under `report` where they are and, if the PDF is
-the plain one, why. A run waiting on a person gets its PDF when it ends, or from
-`npie_report.py --run R` before then. A report that fails to build is a
-warning, never the run's outcome.
+`.tex` and the PDF every time, and its JSON says under `report` where they
+are and, if the PDF is the plain one, why. A run waiting on a person gets its
+PDF too, since it may never be resumed: the first page says it has not ended
+and what it waits on (a person at a named step, or a `resume` after one was
+confirmed), and the PDF is rebuilt as the run goes on. A report that fails to
+build is a warning, never the run's outcome.
 
 `shopping.py` reads the procedure, not the design: each instrument role the
 steps use, with the least spec those steps ask of it (supply volts, and amps
