@@ -85,6 +85,11 @@ def _short(net: str) -> str:
     return net.rsplit("/", 1)[-1] or net
 
 
+def _alive() -> str:
+    """The idle-current floor's wording: something on the board draws current."""
+    return f"above the {IDLE_FLOOR_A * 1000:g} mA alive floor"
+
+
 class _Builder:
     def __init__(self, d: Design):
         self.d = d
@@ -275,7 +280,8 @@ class _Builder:
                           expect={"nominal": 0.5, "min": DIODE_V[0], "max": DIODE_V[1],
                                   "unit": "V"},
                           derived_from=f"{fet} body diode (netlist S={_short(plus['net'])}, "
-                                       f"D={_short(minus['net'])})",
+                                       f"D={_short(minus['net'])}): silicon forward drop "
+                                       f"{DIODE_V[0]:g}-{DIODE_V[1]:g} V",
                           text=f"{fet} body diode conducts one way")
 
     def host_link(self):
@@ -351,7 +357,7 @@ class _Builder:
         self.step("measure", role="psu", quantity="current",
                   expect={"nominal": None, "min": IDLE_FLOOR_A,
                           "max": round(0.9 * ilim, 4), "unit": "A"},
-                  derived_from=f"alive floor; below 90 % of the {ilim:g} A limit from "
+                  derived_from=f"{_alive()}; below 90 % of the {ilim:g} A limit from "
                                "constraints power[] (not in CC)",
                   text="idle input current")
         self.human("Touch-test: no part is hot a few seconds after power-up.")
@@ -596,8 +602,8 @@ class _Builder:
             self.step("measure", role="psu", quantity="current",
                       expect={"nominal": None, "min": IDLE_FLOOR_A,
                               "max": round(0.9 * self.ilim, 4), "unit": "A"},
-                      derived_from=f"unloaded and regulating: below 90 % of the {self.ilim:g} A "
-                                   "limit from constraints power[]",
+                      derived_from=f"unloaded and regulating: {_alive()}, below 90 % of the "
+                                   f"{self.ilim:g} A limit from constraints power[]",
                       text="input current while regulating")
             self.step("console", role="console", send="disarm", expect_re="^OK ",
                       timeout_s=2, derived_from="manifest commands[disarm]")
@@ -731,8 +737,8 @@ class _Builder:
         self.step("measure", role="psu", quantity="current",
                   expect={"nominal": None, "min": IDLE_FLOOR_A,
                           "max": round(0.9 * ilim, 3), "unit": "A"},
-                  derived_from=f"{src}: spinning below 90 % of the {ilim:g} A first-spin "
-                               "limit",
+                  derived_from=f"{src}: spinning, {_alive()}, below 90 % of the {ilim:g} A "
+                               "first-spin limit",
                   text="spin current")
         self.human("Confirm the motor turns smoothly without noise or stalls.")
         self.step("console", role="console", send="disarm", expect_re="^OK ", timeout_s=2,
@@ -754,7 +760,9 @@ class _Builder:
             self.step("measure", role="psu", quantity="current",
                       expect={"nominal": None, "min": IDLE_FLOOR_A,
                               "max": round(0.9 * self.ilim, 4), "unit": "A"},
-                      derived_from=f"idle current holds at requirements VIN {end} {v:g} V",
+                      derived_from=f"idle current holds at requirements VIN {end} {v:g} V: "
+                                   f"{_alive()}, below 90 % of the {self.ilim:g} A limit "
+                                   "from constraints power[]",
                       text=f"idle current at {v:g} V")
         saf = (d.manifest or {}).get("safety", {})
         uv = saf.get("vbus_uv_v")
