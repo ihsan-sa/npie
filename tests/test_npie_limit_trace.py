@@ -128,10 +128,26 @@ def _rails(ws: Path) -> None:
     cp.write_text(json.dumps(c))
 
 
+def _boost_out(ws: Path) -> None:
+    """The boost with Q1's drain on its own /VOUT, not the input, so the boost
+    output is a rail the rails stage measures at idle."""
+    _boost(ws)
+    net = ws / "kicad" / "mini-bldc.net"
+    drain = '      (node (ref "Q1") (pin "5") (pinfunction "D_5") (pintype "passive"))\n'
+    s = net.read_text().replace(drain, "", 1)
+    s = re.sub(r"(\(nets\s*\n)", lambda m: m.group(1) + (
+        f'    (net (code "951") (name "/VOUT")\n{drain}    )\n'), s, count=1)
+    net.write_text(s)
+    cp = ws / "kicad" / "constraints.json"
+    c = json.loads(cp.read_text())
+    c["voltages"].append({"net": "/VOUT", "voltage": 30})
+    cp.write_text(json.dumps(c))
+
+
 @pytest.mark.parametrize("variant", [_mini_bldc, _no_manifest, _evn_header, _spin, _boost,
-                                     _rails],
+                                     _rails, _boost_out],
                          ids=["mini-bldc", "no-manifest", "evn-header", "spin", "boost",
-                              "rails"])
+                              "rails", "boost-out"])
 def test_every_limit_names_its_design_input(tmp_path, variant):
     ws = tmp_path / "mini-bldc"
     shutil.copytree(FIX, ws)

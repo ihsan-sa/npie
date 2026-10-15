@@ -12,8 +12,8 @@ written where a reviewer reads the limit. UNDISCLOSED lists the
 
 A constant no variant's limit moves with passes that unseen (GOALS.md, Every
 limit constant is reached by a fixture), so each must move some limit,
-unless it sets no limit at all (NOT_A_LIMIT) or is listed in UNREACHED,
-which is to be emptied.
+unless it sets no limit at all (NOT_A_LIMIT, held to moving none). UNREACHED
+lists any a new constant leaves without a variant, and is to stay empty.
 
 Only module constants are nudged, so a number written inline in a limit (say
 `round(v * 0.95, 3)`) would slip past. test_no_inline_number_in_a_limit reads
@@ -36,7 +36,7 @@ if str(NPIE) not in sys.path:
     sys.path.insert(0, str(NPIE))
 
 from npielib import design, instruments, procgen  # noqa: E402
-from test_npie_limit_trace import (FIX, _boost, _bringup, _evn_header,  # noqa: E402
+from test_npie_limit_trace import (FIX, _boost, _boost_out, _bringup, _evn_header,  # noqa: E402
                                    _hall, _mini_bldc, _no_manifest, _rails, _spin)
 
 
@@ -48,7 +48,7 @@ def _defaults(ws: Path) -> None:
 
 
 VARIANTS = [_mini_bldc, _no_manifest, _evn_header, _spin, _boost, _hall, _defaults,
-            _rails]
+            _rails, _boost_out]
 NUDGE = 1.37
 # (constant, step text) where the constant moves the limit and derived_from
 # doesn't say so
@@ -57,8 +57,8 @@ UNDISCLOSED: set[tuple[str, str]] = set()
 # instructions); the check holds them to moving no limit
 NOT_A_LIMIT = {"OVP_OVERSHOOT", "INJECT_R_OHM", "INJECT_ILIM_A", "TRIP_SETTLE_S"}
 # limit constants no fixture variant reaches yet, so nothing shows the limit
-# names them; to be emptied by variants that reach them
-UNREACHED = {"BOOST_IDLE_DROP_V"}
+# names them; add a variant that reaches one rather than listing it
+UNREACHED: set[str] = set()
 
 
 def _constants() -> list[str]:
