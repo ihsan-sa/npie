@@ -12,8 +12,9 @@ The engine never waits on a person: a human step ends the invocation with
 status awaiting_human, `confirm` records the answer and `advance` carries on.
 A run that ends, passed, failed or aborted, turns the supply outputs off,
 then any pwm or awg outputs the run drove, before it stops (reference/design.md
-section 3). A run resumed from a person reads the supply back first and
-aborts if it isn't as the run's last supply step left it.
+section 3). A run resumed from a person reads the supply, the pwm generator
+and each awg channel it drove back first, and aborts if one isn't as the
+run's last step on it left it.
 """
 from __future__ import annotations
 
@@ -122,6 +123,42 @@ def _supply_moved(run: "Run") -> str | None:
     def shown(st):
         return f"{float(st['v']):g} V, {float(st['i_limit']):g} A, output {'on' if st['output'] else 'off'}"
     return f"the supply reads {shown(got)}, not {shown(want)} as {left['id']} left it"
+
+
+def _same(got, want) -> bool:
+    """A read-back against the one a step recorded: numbers to the 0.1 % an
+    awg setting reads back to (ScpiSdg.set), lists item by item, the rest equal."""
+    if isinstance(want, list):
+        return isinstance(got, list) and len(got) == len(want) and all(map(_same, got, want))
+    if isinstance(want, (int, float)) and not isinstance(want, bool):
+        return (isinstance(got, (int, float)) and not isinstance(got, bool)
+                and abs(got - want) <= 1e-3 * max(abs(want), 1e-3))
+    return got == want
+
+
+def _drive_moved(run: "Run") -> str | None:
+    """How the pwm generator, or an awg channel, differs from what the run's
+    last step on it read back (its record's `applied`), or None. Like the
+    supply (_supply_moved), a source the run drives is free while it waits on
+    a person, and carrying on would drive the board at a duty, phase or
+    amplitude the procedure never asked for."""
+    left: dict = {}
+    for s in run.steps[:run.index(run.rec["cursor"])]:
+        if s["type"] in ("pwm", "awg"):
+            left[(s["type"], s.get("channel", 1) if s["type"] == "awg" else None)] = s["id"]
+    done = {r["id"]: r for r in run.rec["steps"]}
+    for (kind, ch), sid in sorted(left.items(), key=lambda kv: run.index(kv[1])):
+        want = done.get(sid, {}).get("applied")
+        if want is None:
+            continue
+        got = run.bench.role(kind).state() if kind == "pwm" else run.bench.role(kind).state(ch)
+        moved = [k for k in want if not _same(got.get(k), want[k])]
+        if moved:
+            what = "the pwm generator" if kind == "pwm" else f"awg channel {ch}"
+            return (f"{what} reads " + ", ".join(f"{k} {got.get(k)}" for k in moved)
+                    + ", not " + ", ".join(f"{want[k]}" for k in moved)
+                    + f" as {sid} left it")
+    return None
 
 
 def within(value, e: dict) -> bool:
@@ -239,6 +276,14 @@ class Run:
                 pk.unlink()
 
     def safe_off(self, why: str):
+        if self.bench is not None:
+            # Bench.safe_off turns off the drive sources it has open; a run
+            # resumed after a person's step drove them from an earlier process
+            for kind in sorted({r["type"] for r in self.rec["steps"]} & {"pwm", "awg"}):
+                try:
+                    self.bench.role(kind)
+                except Exception:   # held by another run, or gone: not ours to turn off
+                    pass
         err = self.bench.safe_off() if self.bench is not None else "no bench was opened"
         self.rec["safe_state"] = (f"supply outputs off at {now()} ({why})" if err is None
                                   else f"supply not confirmed off at {now()}: {err} ({why})")
@@ -417,11 +462,11 @@ def advance(run: Run) -> Run:
             run.open_bench()
         if _abort_if_stale(run):
             return run
-        moved = _supply_moved(run) if resumed else None
+        moved = (_supply_moved(run) or _drive_moved(run)) if resumed else None
         if moved:
             run.rec["error"] = (f"{run.rec['cursor']}: {moved} (changed while the run "
                                 "waited on a person); start a new run")
-            run.finish("aborted", "supply changed")
+            run.finish("aborted", "bench changed")
             return run
         for s in run.steps[run.index(run.rec["cursor"]):]:
             run.rec["cursor"] = s["id"]

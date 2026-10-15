@@ -216,8 +216,12 @@ holds nothing, so another run, or someone at the front panel, can change its
 supply in the gap. `resume` therefore reads the supply back (`VOLT?`,
 `CURR?`, `OUTP?`) before it goes on and, if the output, or with the output
 on the voltage or current limit (to 10 mV and 10 mA), isn't what the run's
-last supply step set, aborts the run, supply off, naming both settings. The
-pwm and awg outputs aren't checked this way yet.
+last supply step set, aborts the run, supply off, naming both settings. It
+reads the pwm generator and each awg channel the run drove back the same
+way, against what the run's last step on it read back (its `applied`:
+enable, duty and phase of every pwm channel; wave, frequency, amplitude,
+offset, duty, phase, output and load of an awg channel, to 0.1 %), and
+aborts on a mismatch, naming what moved.
 
 Safety in the runner, independent of the procedure: whenever a run ends
 (passed, on any failed step and on any error) it turns the supply outputs
