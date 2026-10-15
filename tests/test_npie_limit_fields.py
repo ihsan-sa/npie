@@ -15,11 +15,14 @@ limit constant is reached by a fixture), so each must move some limit,
 unless it sets no limit at all (NOT_A_LIMIT, held to moving none). UNREACHED
 lists any a new constant leaves without a variant, and is to stay empty.
 
-Only module constants are nudged, so a number written inline in a limit (say
-`round(v * 0.95, 3)`) would slip past. test_no_inline_number_in_a_limit reads
-procgen's source and fails on any number other than 0 and 1 (and round()'s
-digits) inside a dict literal with a limit key, so every such number is a
-constant the nudge reaches.
+Only module constants are nudged, so a number written inline (say
+`round(v * 0.95, 3)` in a limit, or a `.get("vio_v", 3.3)` fallback feeding
+one) would slip past (GOALS.md, No number hides anywhere in procgen's limit
+math). test_no_loose_number_in_procgen reads procgen's source and fails on
+any number other than 0 and 1 outside its module constants, so every such
+number is a constant the nudge reaches. It passes round()'s digits, f-string
+formatting, subscripts, a step's timing and channel keywords, and the
+arithmetic in ARITHMETIC.
 """
 from __future__ import annotations
 
@@ -36,8 +39,9 @@ if str(NPIE) not in sys.path:
     sys.path.insert(0, str(NPIE))
 
 from npielib import design, instruments, procgen  # noqa: E402
-from test_npie_limit_trace import (FIX, _boost, _boost_out, _bringup, _evn_header,  # noqa: E402
-                                   _hall, _mini_bldc, _no_manifest, _rails, _spin)
+from test_npie_limit_trace import (FIX, _boost, _boost_low, _boost_out, _bringup,  # noqa: E402
+                                   _evn_header, _fallbacks, _hall, _mini_bldc,
+                                   _no_manifest, _rails, _spin)
 
 
 def _defaults(ws: Path) -> None:
@@ -48,14 +52,15 @@ def _defaults(ws: Path) -> None:
 
 
 VARIANTS = [_mini_bldc, _no_manifest, _evn_header, _spin, _boost, _hall, _defaults,
-            _rails, _boost_out]
+            _rails, _boost_out, _boost_low, _fallbacks]
 NUDGE = 1.37
 # (constant, step text) where the constant moves the limit and derived_from
 # doesn't say so
 UNDISCLOSED: set[tuple[str, str]] = set()
 # constants that shape no expect or fields (a console duty, a wait, a person's
-# instructions); the check holds them to moving no limit
-NOT_A_LIMIT = {"OVP_OVERSHOOT", "INJECT_R_OHM", "INJECT_ILIM_A", "TRIP_SETTLE_S"}
+# instructions, a supply setting); the check holds them to moving no limit
+NOT_A_LIMIT = {"OVP_OVERSHOOT", "INJECT_R_OHM", "INJECT_ILIM_A", "TRIP_SETTLE_S",
+               "OV_AIM_RATING_FRAC", "VDDA_DEFAULT_V", "SPIN_V_DEFAULT", "UV_UNDERSHOOT_V"}
 # limit constants no fixture variant reaches yet, so nothing shows the limit
 # names them; add a variant that reaches one rather than listing it
 UNREACHED: set[str] = set()
@@ -104,36 +109,56 @@ def test_the_nudge_finds_the_constants():
     assert "PWM8_ID" not in names and "SCHEMA" not in names
 
 
-LIMIT_KEYS = {"nominal", "min", "max", "edges_min"}
+# a step's timing and wiring, not a pass/fail limit
+STEP_KW = {"timeout_s", "seconds", "channel", "channel2", "samplerate", "duration_s"}
+# arithmetic, not a bench choice, by the expression the number sits in: a
+# two-pin part, the mean of two references
+ARITHMETIC = {"len(self.d.pins_of(n['ref'])) == 2", "sum(vref) / 2"}
 
 
-def _inline_numbers(src: str) -> list[str]:
-    """Numbers other than 0 and 1 written inside a limit dict literal."""
+def _loose_numbers(src: str) -> list[str]:
+    """Numbers other than 0 and 1 outside the module's constants."""
+    tree = ast.parse(src)
+    parent, passed = {}, set()
+    for node in ast.walk(tree):
+        for child in ast.iter_child_nodes(node):
+            parent[id(child)] = node
+        if isinstance(node, ast.Assign) and node in tree.body or isinstance(node, ast.JoinedStr):
+            passed.add(id(node))
+        elif isinstance(node, ast.Subscript):
+            passed.add(id(node.slice))
+        elif isinstance(node, ast.keyword) and node.arg in STEP_KW:
+            passed.add(id(node.value))
+        elif (isinstance(node, ast.Call) and getattr(node.func, "id", None) == "round"
+              and len(node.args) > 1):
+            passed.add(id(node.args[1]))
     found = []
-    for node in ast.walk(ast.parse(src)):
-        if not isinstance(node, ast.Dict) or not LIMIT_KEYS & {
-                k.value for k in node.keys if isinstance(k, ast.Constant)}:
+    for node in ast.walk(tree):
+        if (not isinstance(node, ast.Constant) or type(node.value) not in (int, float)
+                or node.value in (0, 1)):
             continue
-        for v in node.values:
-            digits = {id(c.args[1]) for c in ast.walk(v) if isinstance(c, ast.Call)
-                      and getattr(c.func, "id", None) == "round" and len(c.args) > 1}
-            for c in ast.walk(v):
-                if (isinstance(c, ast.Constant) and type(c.value) in (int, float)
-                        and c.value not in (0, 1) and id(c) not in digits):
-                    found.append(f"line {c.lineno}: {ast.unparse(v)}")
+        up, at = node, ast.unparse(parent[id(node)])
+        while id(up) in parent and id(up) not in passed:
+            up = parent[id(up)]
+        if id(up) not in passed and at not in ARITHMETIC:
+            found.append(f"line {node.lineno}: {at}")
     return found
 
 
-def test_the_scan_finds_an_inline_number():
-    assert _inline_numbers('e = {"min": round(v * 0.95, 3), "unit": "V"}')
-    assert _inline_numbers('s(expect={"edges_min": 2})')
-    assert not _inline_numbers('e = {"min": round(v * (1 - TOL), 3), "max": 0}')
+def test_the_scan_finds_a_loose_number():
+    assert _loose_numbers('def f(v):\n    return {"min": round(v * 0.95, 3), "unit": "V"}')
+    assert _loose_numbers('def f(v):\n    return min(v + 2.0, 9)')
+    assert _loose_numbers('def f(hdr):\n    return hdr.get("vio_v", 3.3)')
+    assert not _loose_numbers('X = 0.5\n'
+                              'def f(s, h, a, v):\n'
+                              '    s.step("wait", seconds=2.0, timeout_s=h.get("t", 5))\n'
+                              '    return f"{v * 100:g}", a[2], round(v * X, 3), {"max": 0}')
 
 
-def test_no_inline_number_in_a_limit():
-    found = _inline_numbers(Path(procgen.__file__).read_text())
-    assert not found, ("numbers written inline in a procgen limit, which the nudge "
-                       "can't reach; make each a module constant and name it in "
+def test_no_loose_number_in_procgen():
+    found = _loose_numbers(Path(procgen.__file__).read_text())
+    assert not found, ("numbers written inline in procgen, which the nudge can't "
+                       "reach; make each a module constant and name it in "
                        "derived_from:\n" + "\n".join(found))
 
 
