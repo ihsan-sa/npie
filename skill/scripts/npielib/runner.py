@@ -322,8 +322,9 @@ def advance(run: Run) -> Run:
         run.rec["error"] = f"{run.rec['cursor']}: {type(exc).__name__}: {exc}"
         run.finish("aborted", "error")
         return run
-    except KeyboardInterrupt:    # Ctrl-C mid-step: supply off and on record, then stop
-        run.rec["error"] = f"{run.rec['cursor']}: interrupted"
+    except KeyboardInterrupt as exc:   # Ctrl-C (or a signal npie_run.py turns into one)
+        by = f" by {exc}" if str(exc) else ""   # mid-step: supply off and on record, then stop
+        run.rec["error"] = f"{run.rec['cursor']}: interrupted{by}"
         run.finish("aborted", "interrupted")
         raise
     finally:

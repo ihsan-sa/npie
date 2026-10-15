@@ -21,9 +21,11 @@ simulated fault (short:<net>, rail:<net>=<V>, no-banner, no-flash).
 which only the bench host sets (reference/bench-hosts.md): the box never
 opens an instrument.
 
-On any failed step, instrument error, bench that can't be built or Ctrl-C the
-supply outputs go off before the run stops (Ctrl-C aborts it, exit 130), so
-no run is left "running" behind a dead process. Whenever start, confirm or resume leaves a run, it writes the
+On any failed step, instrument error, bench that can't be built, Ctrl-C,
+SIGTERM or SIGHUP the supply outputs go off before the run stops (a Ctrl-C or
+signal aborts it, exit 128 + the signal: 130, 143, 129), so no run is left
+"running" behind a dead process: not a killed one, a timed-out job's or a
+dropped ssh session's either. Whenever start, confirm or resume leaves a run, it writes the
 run's report (npie_report.py): report.tex every time, and report.pdf too once
 the run has ended (passed, failed or aborted), so every run is on record. A
 report that cannot be built is a warning under "report", never the run's
@@ -36,6 +38,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import signal
 import sys
 from pathlib import Path
 
@@ -50,6 +53,37 @@ from npielib import design, runner  # noqa: E402
 def _out(payload: dict, code: int) -> int:
     print(json.dumps(payload, indent=1))
     return code
+
+
+STOP_SIGNALS = ("SIGTERM", "SIGHUP")   # kill, a job timeout, a dropped ssh session
+
+
+class Stopped(KeyboardInterrupt):
+    """A stop signal, raised where Ctrl-C would be so it takes the same abort."""
+
+    def __init__(self, signum: int):
+        super().__init__(signal.Signals(signum).name)
+        self.signum = signum
+
+
+def _catch_stop_signals() -> dict:
+    """Raise Stopped on each STOP_SIGNALS signal (once: a second one while
+    the run aborts is ignored). Returns the old handlers to put back."""
+    old = {}
+
+    def stop(signum, frame):
+        for s in old:
+            signal.signal(s, signal.SIG_IGN)
+        raise Stopped(signum)
+    for name in STOP_SIGNALS:
+        s = getattr(signal, name, None)    # no SIGHUP on Windows
+        if s is None:
+            continue
+        try:
+            old[s] = signal.signal(s, stop)
+        except ValueError:                 # not the main thread: leave signals alone
+            break
+    return old
 
 
 def _report(run: runner.Run) -> dict:
@@ -86,6 +120,15 @@ def main(argv=None) -> int:
         sub.add_parser(name).add_argument("--run", required=True)
     a = ap.parse_args(argv)
 
+    old = _catch_stop_signals()
+    try:
+        return _main(a)
+    finally:
+        for s, h in old.items():
+            signal.signal(s, h)
+
+
+def _main(a) -> int:
     run = None
     try:
         if a.cmd == "start":
@@ -115,12 +158,12 @@ def main(argv=None) -> int:
                 runner.advance(run)
     except (runner.RunError, design.DesignError, OSError, yaml.YAMLError) as exc:
         return _out({"ok": False, "error": str(exc)}, 2)
-    except KeyboardInterrupt:
+    except KeyboardInterrupt as exc:
         if run is None or run.rec["status"] != "aborted":
             raise
         out = runner.summary(run)      # advance turned the supply off and saved the run
         out["report"] = _report(run)
-        return _out(out, 130)
+        return _out(out, 128 + getattr(exc, "signum", signal.SIGINT))
     out = runner.summary(run)
     if a.cmd != "status":
         out["report"] = _report(run)
