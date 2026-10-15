@@ -6,6 +6,14 @@ The design inputs are the ones procedure.json lists under `inputs`: the
 netlist, constraints.json, the BOM, requirements.md and the fwe manifest
 (and bringup/overrides.yaml when a person overrides a limit). Fixture boards
 only, so the check runs everywhere.
+
+A bare input name is not enough: `derived_from` has to point into the input,
+as in `manifest commands[duty]`, `manifest safety.vout_ov_v`, `constraints
+voltages[+3V3]`, `requirements VIN` or `netlist U3`. That is still only a
+format check, so a reviewer has to confirm that the named field really gives
+the limit. A limit that comes from a procgen constant and nothing in the
+design says `procgen default` and is listed in RULE_ONLY. The goal is done
+when RULE_ONLY is empty.
 """
 from __future__ import annotations
 
@@ -25,7 +33,15 @@ if str(NPIE) not in sys.path:
 
 from npielib import design, procgen  # noqa: E402
 
-DESIGN_INPUT_RE = re.compile(r"\b(netlist|constraints|BOM|requirements|manifest)\b")
+DESIGN_INPUT_RE = re.compile(
+    r"\bmanifest [a-z_]+(\.[a-z_]+|\[[^\]]+\])"
+    r"|\bconstraints [a-z_]+\["
+    r"|\brequirements VIN\b"
+    r"|\bnetlist [A-Z+/][\w+/*-]*"
+    r"|\bBOM [A-Z]+\d")
+# limits that are procgen constants with nothing in the design behind them yet,
+# by step text
+RULE_ONLY = re.compile(r" to GND is not a short$|^spin current$")
 EVN_BLOCK = {"topology": "board-to-board-header", "block": "B1",
              "name": "J9 2x20 2.54 male to EVN JP8", "operating_point": {"vio_v": 3.3}}
 
@@ -59,8 +75,13 @@ def test_every_limit_names_its_design_input(tmp_path, variant):
     shutil.copytree(FIX, ws)
     variant(ws)
     proc = procgen.generate(design.load(ws))
-    untraced = [f"{s['id']} {s.get('text')!r}: {s.get('derived_from')!r}"
-                for st in proc["stages"] for s in st["steps"]
-                if (s.get("expect") or s.get("fields"))
-                and not DESIGN_INPUT_RE.search(s.get("derived_from") or "")]
+    untraced = []
+    for s in (s for st in proc["stages"] for s in st["steps"]
+              if s.get("expect") or s.get("fields")):
+        src = s.get("derived_from") or ""
+        if "procgen default" in src:
+            if not RULE_ONLY.search(s.get("text") or ""):
+                untraced.append(f"{s['id']} {s.get('text')!r}: {src!r} (not in RULE_ONLY)")
+        elif not DESIGN_INPUT_RE.search(src):
+            untraced.append(f"{s['id']} {s.get('text')!r}: {src!r}")
     assert not untraced, "limits that name no design input:\n" + "\n".join(untraced)
