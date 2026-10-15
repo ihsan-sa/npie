@@ -5,7 +5,8 @@ in bringup/overrides.yaml, beside the generated one it replaced.
 
 Each fixture variant of test_npie_limit_fields is built into report.tex for a
 run that has reached no step yet, so every limit procgen emits is checked
-without running it. One dry run with an override checks a real run's report,
+without running it, in the .tex and in the plain text a host without
+lualatex puts in its PDF. One dry run with an override checks a real run's report,
 and its PDF where lualatex is on the host (CI requires it). Nothing here
 opens an instrument.
 """
@@ -61,6 +62,7 @@ def test_every_limit_and_its_source_is_in_the_report(tmp_path, variant):
     proc = procgen.generate(design.load(ws))
     tex = npie_report.build_tex(tmp_path, NOT_STARTED, proc)
     meas, src = _section(tex, "Measurements"), _section(tex, SOURCES)
+    plain = npie_report.plain_text(tex)
     missing = []
     for s in _limited(proc):
         want = [npie_report.limits(s["expect"])] if s.get("expect") else []
@@ -72,6 +74,12 @@ def test_every_limit_and_its_source_is_in_the_report(tmp_path, variant):
         row = _rows(src, s["id"])
         if len(row) != 1 or npie_report.esc(s["derived_from"]) not in row[0]:
             missing.append(f"{s['id']} {s.get('text')!r}: source {s['derived_from']!r} not in {row}")
+        # and the same in the plain PDF a host without lualatex leaves
+        rows = [l for l in plain if l.startswith(s["id"] + " | ")]
+        if not any(all(npie_report.detex(w) in r for w in want) for r in rows):
+            missing.append(f"{s['id']}: plain limits {want} not in {rows}")
+        if f"{s['id']} | {npie_report.detex(npie_report.esc(s['derived_from']))}" not in rows:
+            missing.append(f"{s['id']}: plain source {s['derived_from']!r} not in {rows}")
     assert _limited(proc) and not missing, "limits off the record:\n" + "\n".join(missing)
 
 

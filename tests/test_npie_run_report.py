@@ -3,15 +3,16 @@
 Each case dry-runs the mini-bldc fixture to one way a run can stop (passed,
 failed, aborted, waiting on a person) and checks that the run dir holds a
 report.tex that names that status, and that the JSON names the report. An
-ended run also gets report.pdf where lualatex is on the host; elsewhere the
-JSON says why not. With NPIE_REQUIRE_PDF=1, as CI sets it, a host without
-lualatex fails here instead of skipping the PDF. Nothing here opens an
-instrument.
+ended run also gets report.pdf: in the house style where lualatex is on the
+host, elsewhere a plain one, and the JSON says why. With NPIE_REQUIRE_PDF=1,
+as CI sets it, a host without lualatex fails here instead of passing on the
+plain PDF. Nothing here opens an instrument.
 """
 from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -53,14 +54,60 @@ def _on_record(out, status, ended=True):
     tex = (run / "report.tex").read_text(encoding="ascii")
     assert f"{npie_report.esc(status)}, " in tex       # the title block's status line
     assert ("Not a pass" in tex) == (status != "passed")
-    if ended and PDF_HOST:
-        assert rep["ok"] and (run / "report.pdf").read_bytes()[:5] == b"%PDF-", rep
+    if ended:
+        # every ended run leaves a PDF: the house style's, else the plain one
+        assert rep["pdf"] == str(run / "report.pdf"), rep
+        assert (run / "report.pdf").read_bytes()[:5] == b"%PDF-", rep
+        assert rep["ok"] if PDF_HOST else "plain PDF" in rep["warnings"][-1], rep
     else:
-        assert rep["pdf"] is None and rep["warnings"], rep
+        assert rep["pdf"] is None and "run not ended" in rep["warnings"][0], rep
         assert not (run / "report.pdf").exists()
-    if not ended:
-        assert "run not ended" in rep["warnings"][0]
     return tex
+
+
+def pdf_text(pdf: bytes) -> str:
+    """A plain report PDF's text, after checking its xref points at each of
+    its objects (what a reader follows to open it)."""
+    assert pdf.startswith(b"%PDF-") and pdf.rstrip().endswith(b"%%EOF")
+    xref = int(re.search(rb"startxref\n(\d+)\n", pdf)[1])
+    head, *entries = pdf[xref:].split(b"trailer")[0].decode("ascii").splitlines()[1:]
+    assert entries and int(head.split()[1]) == len(entries)
+    for n, e in enumerate(entries[1:], 1):
+        assert pdf[int(e[:10]):].startswith(f"{n} 0 obj\n".encode()), (n, e)
+    rows = re.findall(rb"\(((?:\\.|[^\\)])*)\) Tj", pdf)
+    return "\n".join(re.sub(r"\\(.)", r"\1", r.decode("ascii")) for r in rows)
+
+
+def _flat(s: str) -> str:
+    return re.sub(r"\s+", "", s)
+
+
+def test_a_host_without_lualatex_still_leaves_a_pdf(tmp_path):
+    # NPIE_LUALATEX naming no program stands for a bench host with no TeX at
+    # all, and for a compile that fails: either way the plain PDF is written
+    ws = _ws(tmp_path)
+    env = {k: v for k, v in os.environ.items() if k != "NPIE_BENCH_HOST"}
+    env["NPIE_LUALATEX"] = str(tmp_path / "no-lualatex")
+    r = subprocess.run([sys.executable, str(NPIE / "npie_run.py"), "start", "--workspace", str(ws),
+                        "--dry-run", "--fault", "short:+5V"], capture_output=True, text=True, env=env)
+    out = json.loads(r.stdout)
+    rep, run = out["report"], Path(out["run"])
+    assert r.returncode == 1 and out["status"] == "failed"
+    assert not rep["ok"] and rep["pdf"] == str(run / "report.pdf"), rep
+    assert rep["warnings"][0].startswith("lualatex FileNotFoundError"), rep
+    text = pdf_text((run / "report.pdf").read_bytes())
+    assert text.startswith("Plain report: lualatex FileNotFoundError")
+    for want in ["failed, ", "** Not a pass", out["failed"]["id"],
+                 "Safe state: supply outputs off", "Where each limit came from"]:
+        assert _flat(want) in _flat(text), want
+    tex = (run / "report.tex").read_text(encoding="ascii")
+    assert _flat("\n".join(npie_report.plain_text(tex))) in _flat(text)
+
+
+def test_the_plain_text_undoes_every_escape():
+    s = "R_1 & 50% {x} $5 #2 a\\b <c> d|e ^f ~g"
+    assert npie_report.detex(npie_report.esc(s)) == s
+    assert npie_report.detex(npie_report.sid("rails.02")) == "rails.02"
 
 
 def test_a_host_that_requires_the_pdf_can_build_it():
