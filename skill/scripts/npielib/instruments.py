@@ -33,6 +33,7 @@ import os
 import random
 import re
 import shutil
+import stat
 import subprocess
 import tempfile
 import time
@@ -943,11 +944,34 @@ class _Named:
         return call
 
 
-LOCK_DIR_ENV = "NPIE_LOCK_DIR"   # where instrument locks live; the host's temp dir if unset
+LOCK_DIR_ENV = "NPIE_LOCK_DIR"   # where instrument locks live; a per-user dir in temp if unset
 
 
 def lock_dir() -> Path:
-    return Path(os.environ.get(LOCK_DIR_ENV) or Path(tempfile.gettempdir()) / "npie-instruments")
+    if os.environ.get(LOCK_DIR_ENV):
+        return Path(os.environ[LOCK_DIR_ENV])
+    # Per user: in a shared temp dir another user could plant a symlink for a
+    # lock name, or hold every lock and block this user's runs. (Windows'
+    # temp dir is per user already.)
+    uid = f"-{os.getuid()}" if hasattr(os, "getuid") else ""
+    return Path(tempfile.gettempdir()) / f"npie-instruments{uid}"
+
+
+def _own_dir(d: Path) -> None:
+    """Make `d` (0700), or refuse it if it is a symlink, isn't ours, or others
+    can write in it: anyone who can could swap a lock file for a link."""
+    try:
+        d.mkdir(mode=0o700, parents=True, exist_ok=True)
+        st = os.lstat(d)
+    except OSError as exc:
+        raise BenchError(f"can't make instrument lock dir {d}: {exc}") from None
+    if not hasattr(os, "getuid"):
+        return
+    if (not stat.S_ISDIR(st.st_mode) or st.st_uid != os.getuid()
+            or st.st_mode & (stat.S_IWGRP | stat.S_IWOTH)):
+        raise BenchError(f"instrument lock dir {d} must be a directory of this user's "
+                         "that no one else can write in; remove it or set "
+                         f"{LOCK_DIR_ENV} to one")
 
 
 def _address(rc: dict) -> str:
@@ -961,8 +985,13 @@ def _hold(address: str, what: str):
     """Lock `address` host-wide for this process (until the file is closed,
     or the process dies and the OS lets go), or raise naming the holder."""
     d = lock_dir()
-    d.mkdir(parents=True, exist_ok=True)
-    f = open(d / (re.sub(r"[^A-Za-z0-9._-]", "_", address) + ".lock"), "a+", encoding="ascii")
+    _own_dir(d)
+    path = d / (re.sub(r"[^A-Za-z0-9._-]", "_", address) + ".lock")
+    try:   # never through a link: it would truncate whatever it points at
+        fd = os.open(path, os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0), 0o600)
+    except OSError as exc:
+        raise BenchError(f"can't open instrument lock {path}: {exc}") from None
+    f = open(fd, "r+", encoding="ascii")
     try:
         f.seek(0)
         if fcntl is not None:

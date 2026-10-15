@@ -204,8 +204,10 @@ step whose outcome nobody knows.
 One process drives an instrument at a time, too: a live bench holds a
 host-wide lock on each instrument's address (its VISA resource or serial
 port, else its driver and device or tool) from the first call on it until
-the process lets go of the run, in the host's temp dir (`npie-instruments/`,
-or `NPIE_LOCK_DIR`). A second run, from another `start` or another
+the process lets go of the run, in a dir of the user's own
+(`npie-instruments-<uid>/` in the temp dir, or `NPIE_LOCK_DIR`; a dir that
+is a link, is another user's, or others can write in is refused, and a lock
+file is never opened through a link). A second run, from another `start` or another
 workspace whose bench.yaml names the same supply, is refused that
 instrument, naming the holder's pid, and aborts without writing to it, its
 end-of-run off included, so its `safe_state` says "supply not confirmed

@@ -151,3 +151,35 @@ def test_a_run_lets_go_of_its_instruments_when_released(models, tmp_path):
         instruments.Bench(CFG).role("psu")
     run.release()
     instruments.Bench(CFG).role("psu")
+
+
+posix_only = pytest.mark.skipif(not hasattr(os, "getuid"), reason="POSIX ownership and modes")
+
+
+@posix_only
+def test_the_default_lock_dir_is_this_users(monkeypatch):
+    """In a shared temp dir another user could plant links or hold every lock."""
+    monkeypatch.delenv("NPIE_LOCK_DIR")
+    assert instruments.lock_dir().name == f"npie-instruments-{os.getuid()}"
+
+
+@posix_only
+def test_a_lock_name_that_is_a_link_is_refused_and_its_target_untouched(models, tmp_path):
+    d = tmp_path / "locks"
+    d.mkdir(mode=0o700)
+    victim = tmp_path / "victim"
+    victim.write_text("keep me\n")
+    (d / "TCPIP__psu.lock").symlink_to(victim)
+    with pytest.raises(instruments.BenchError, match="can't open instrument lock"):
+        instruments.Bench(CFG).role("psu")
+    assert victim.read_text() == "keep me\n"
+
+
+@posix_only
+def test_a_lock_dir_others_can_write_in_is_refused(models, tmp_path):
+    d = tmp_path / "locks"
+    d.mkdir()
+    d.chmod(0o777)
+    with pytest.raises(instruments.BenchError, match="no one else can write in"):
+        instruments.Bench(CFG).role("psu")
+    assert not list(d.iterdir())
