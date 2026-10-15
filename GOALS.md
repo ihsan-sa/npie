@@ -46,6 +46,7 @@ What has landed, from the git history (a line per PR). A proposed goal that clos
 - [#30](https://github.com/ihsan-sa/npie/pull/30) Record the boost trace step in GOALS.md and run notes
 - [#34](https://github.com/ihsan-sa/npie/pull/34) Close the limit-trace goal in GOALS.md and add run notes
 - [#36](https://github.com/ihsan-sa/npie/pull/36) Write each run's report from npie_run.py when it stops
+- [#38](https://github.com/ihsan-sa/npie/pull/38) Close the limit-field goal in GOALS.md and add run notes
 
 ### Every limit names its design input
 
@@ -67,3 +68,10 @@ What has landed, from the git history (a line per PR). A proposed goal that clos
 - **Done when:** `make check VENV=/home/dispatch-w-npie/venvs/npie` passes with `tests/test_npie_limit_fields.py` nudging each numeric procgen constant in turn, regenerating every fixture variant of `tests/test_npie_limit_trace.py`, and finding no step whose `expect` or `fields` moved while its `derived_from` stayed the same, with its `UNDISCLOSED` list empty.
 - **Status:** done
 - **Pull requests:** the PR from `dispatch/37` (the per-step trace check passed a step on one field's source while another field came from a hidden constant; nudging found nine such steps from `IDLE_FLOOR_A`, `DIODE_V` and `FIRST_ILIMIT_A`, and their `derived_from` now states the alive floor, the diode band and the 90 % current ceiling. Numbers written inline in procgen, not as constants, aren't nudged yet).
+
+### Every generated step runs on the live drivers
+
+- **Serves:** One driver layer
+- **Done when:** `make check VENV=/home/dispatch-w-npie/venvs/npie` passes with `tests/test_npie_live_drivers.py` binding each fixture variant's procedure (those of `tests/test_npie_limit_trace.py`, plus a Hall-sensor variant and the pwm/awg stage of `tests/test_npie_rf_instruments.py`) to the bench that procedure_gen's `bench.example.yaml` describes, running every instrument step through `runner.execute` on the `LIVE` drivers over fake transports, and finding no step a live driver refuses, every role in `instruments.SIM` opened live by some variant, and every role in `BENCH_EXAMPLE` bound to a driver in `LIVE`.
+- **Status:** done
+- **Pull requests:** the PR from `dispatch/39` (before it, only the sim twins had ever met a generated step, and they take any quantity the live DMM and scope don't. The check found the bench example had no `awg` line, so a procedure with an awg step got a bench.yaml that couldn't drive it, and `bench_example` dropped such a role without saying so. It now has the line, and an unknown role is written as a comment. No fixture reached the logic step, so the test adds Hall nets).

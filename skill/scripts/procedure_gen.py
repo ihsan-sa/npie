@@ -36,6 +36,7 @@ BENCH_EXAMPLE = {
     "console": '{driver: serial, port: /dev/ttyUSB0, baud: 115200}',
     "probe": '{driver: swd, tool: probe-rs}',
     "pwm": '{driver: fwe-pwm8, port: /dev/ttyUSB1, baud: 115200, f_rf_hz: 13560267.8}',
+    "awg": '{driver: scpi-sdg, resource: "TCPIP0::<ip>::INSTR"}',
 }
 
 
@@ -43,7 +44,9 @@ def bench_example(proc: dict) -> str:
     L = [f"# bench.yaml for {proc['board']}: copy to bench.yaml on the bench host and",
          "# fill in each resource. The box never uses this file.",
          "bench: owner-laptop", "roles:"]
-    L += [f"  {r}: {BENCH_EXAMPLE[r]}" for r in proc["roles"] if r in BENCH_EXAMPLE]
+    L += [f"  {r}: {BENCH_EXAMPLE[r]}" if r in BENCH_EXAMPLE
+          else f"  # {r}: no example driver; bind it as reference/design.md section 4 says"
+          for r in proc["roles"]]
     return "\n".join(L) + "\n"
 
 
