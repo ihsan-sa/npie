@@ -49,6 +49,7 @@ What has landed, from the git history (a line per PR). A proposed goal that clos
 - [#38](https://github.com/ihsan-sa/npie/pull/38) Close the limit-field goal in GOALS.md and add run notes
 - [#40](https://github.com/ihsan-sa/npie/pull/40) Run every generated step on the live drivers; add awg example
 - [#42](https://github.com/ihsan-sa/npie/pull/42) Check the bench host at every hardware door, not just Bench
+- [#44](https://github.com/ihsan-sa/npie/pull/44) Abort and report a run on Ctrl-C or a bench that won't build
 
 ### Every limit names its design input
 
@@ -90,4 +91,11 @@ What has landed, from the git history (a line per PR). A proposed goal that clos
 - **Serves:** Every run on record
 - **Done when:** `make check VENV=/home/dispatch-w-npie/venvs/npie` passes with `tests/test_npie_run_orphans.py` driving `npie_run.py` into each way it can stop once a run dir may exist (a `rail:` fault with no volts, a bench that can't be built, Ctrl-C mid-step at start and at resume) and finding each one refused before any run dir exists, or its run aborted with `report.tex` written, the interrupted ones with `safe_state` saying the supply went off and exit 130; and, after every case, no run dir under `bringup/runs` that is still `running` or has no `report.tex`.
 - **Status:** done
-- **Pull requests:** the PR from `dispatch/43` (before it, `--fault rail:+5V=abc` passed `create`, made a run dir and then crashed building the `SimBoard`; a bench that failed to build did the same, since it was opened outside `advance`'s try; and Ctrl-C, not an `Exception`, went past the abort, so the run stayed `running` with no report and, on a real bench, its supply on. Now `create` refuses the fault, `advance` opens the bench inside its try, and an interrupt aborts the run, turns the supply off and saves it before `npie_run.py` writes the report and exits 130. With the interrupt handler removed, both Ctrl-C tests fail).
+- **Pull requests:** [#44](https://github.com/ihsan-sa/npie/pull/44) (before it, `--fault rail:+5V=abc` passed `create`, made a run dir and then crashed building the `SimBoard`; a bench that failed to build did the same, since it was opened outside `advance`'s try; and Ctrl-C, not an `Exception`, went past the abort, so the run stayed `running` with no report and, on a real bench, its supply on. Now `create` refuses the fault, `advance` opens the bench inside its try, and an interrupt aborts the run, turns the supply off and saves it before `npie_run.py` writes the report and exits 130. With the interrupt handler removed, both Ctrl-C tests fail).
+
+### A killed run still turns the supply off and writes its report
+
+- **Serves:** Every run on record
+- **Done when:** `make check VENV=/home/dispatch-w-npie/venvs/npie` passes with `tests/test_npie_run_orphans.py` starting `npie_run.py --dry-run` in its own process, holding it mid-step, sending it each of `npie_run.STOP_SIGNALS` (SIGTERM and SIGHUP) for real, and finding the process exit with 128 + the signal, its run aborted "interrupted by <signal>" with `safe_state` saying the supply went off and `report.tex` written; and with the signal handlers `npie_run.main` installs put back when it returns.
+- **Status:** done
+- **Pull requests:** the PR from `dispatch/45` (before it, only Ctrl-C took #44's abort path. Python has no handler for SIGTERM or SIGHUP, so a killed process, a job timeout or a dropped ssh session ended `npie_run.py` on the spot: the run stayed `running` with no report and, on a real bench, the supply on. Now `npie_run.main` turns either signal into a `KeyboardInterrupt` subclass for the length of the call, ignores a second one while the run aborts, and exits 128 + the signal. With the handlers not installed, both signal tests fail and leave the run `running`).

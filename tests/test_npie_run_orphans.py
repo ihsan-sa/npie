@@ -2,8 +2,9 @@
 
 test_npie_run_report.py covers the ways a run ends as designed. This covers
 the ways npie_run.py can stop once it has made a run dir: a fault argument
-that parses only halfway, a bench that can't be built, and Ctrl-C mid-step
-(at start and at resume). Each must either be refused before a run dir
+that parses only halfway, a bench that can't be built, Ctrl-C mid-step (at
+start and at resume), and SIGTERM or SIGHUP mid-step (a killed process, a job
+timeout, a dropped ssh session), sent for real to npie_run.py's own process. Each must either be refused before a run dir
 exists, or leave the run aborted, its supply off and its report.tex written.
 Nothing here opens an instrument.
 """
@@ -11,8 +12,10 @@ from __future__ import annotations
 
 import json
 import shutil
+import signal
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -101,6 +104,51 @@ def test_ctrl_c_at_resume_turns_the_supply_off_and_leaves_the_report(ws, capsys,
             break
     assert rc == 130
     _aborted(out, "interrupted")
+
+
+# npie_run.py in its own process, with the first DMM reading hanging until a
+# signal arrives
+HANG = """
+import pathlib, sys, time
+sys.path.insert(0, sys.argv[1])
+import npie_run
+from npielib import instruments
+def hang(self, *a, **k):
+    pathlib.Path(sys.argv[2]).touch()
+    time.sleep(120)
+instruments.SimDmm.measure = hang
+sys.exit(npie_run.main(sys.argv[3:]))
+"""
+
+
+@pytest.mark.parametrize("name", npie_run.STOP_SIGNALS)
+def test_a_stop_signal_mid_step_turns_the_supply_off_and_leaves_the_report(ws, tmp_path, name):
+    sig = getattr(signal, name, None)
+    if sig is None:
+        pytest.skip(f"no {name} on this platform")
+    ready = tmp_path / "mid-step"
+    p = subprocess.Popen([sys.executable, "-c", HANG, str(NPIE), str(ready),
+                          "start", "--workspace", str(ws), "--dry-run"],
+                         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    try:
+        for _ in range(600):
+            if ready.exists() or p.poll() is not None:
+                break
+            time.sleep(0.05)
+        assert ready.exists(), p.communicate(timeout=30)
+        p.send_signal(sig)
+        stdout, stderr = p.communicate(timeout=60)
+    finally:
+        if p.poll() is None:
+            p.kill()
+    assert p.returncode == 128 + sig, stdout + stderr
+    _aborted(json.loads(stdout), f"interrupted by {name}")
+
+
+def test_stop_signal_handlers_are_put_back(ws, capsys):
+    before = signal.getsignal(signal.SIGTERM)
+    _main(capsys, "start", "--workspace", str(ws), "--dry-run")
+    assert signal.getsignal(signal.SIGTERM) is before
 
 
 def test_ctrl_c_before_a_run_exists_is_left_alone(ws, monkeypatch):
