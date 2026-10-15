@@ -50,6 +50,7 @@ What has landed, from the git history (a line per PR). A proposed goal that clos
 - [#40](https://github.com/ihsan-sa/npie/pull/40) Run every generated step on the live drivers; add awg example
 - [#42](https://github.com/ihsan-sa/npie/pull/42) Check the bench host at every hardware door, not just Bench
 - [#44](https://github.com/ihsan-sa/npie/pull/44) Abort and report a run on Ctrl-C or a bench that won't build
+- [#46](https://github.com/ihsan-sa/npie/pull/46) Abort and report a run on SIGTERM or SIGHUP, not just Ctrl-C
 
 ### Every limit names its design input
 
@@ -98,4 +99,11 @@ What has landed, from the git history (a line per PR). A proposed goal that clos
 - **Serves:** Every run on record
 - **Done when:** `make check VENV=/home/dispatch-w-npie/venvs/npie` passes with `tests/test_npie_run_orphans.py` starting `npie_run.py --dry-run` in its own process, holding it mid-step, sending it each of `npie_run.STOP_SIGNALS` (SIGTERM and SIGHUP) for real, and finding the process exit with 128 + the signal, its run aborted "interrupted by <signal>" with `safe_state` saying the supply went off and `report.tex` written; and with the signal handlers `npie_run.main` installs put back when it returns.
 - **Status:** done
-- **Pull requests:** the PR from `dispatch/45` (before it, only Ctrl-C took #44's abort path. Python has no handler for SIGTERM or SIGHUP, so a killed process, a job timeout or a dropped ssh session ended `npie_run.py` on the spot: the run stayed `running` with no report and, on a real bench, the supply on. Now `npie_run.main` turns either signal into a `KeyboardInterrupt` subclass for the length of the call, ignores a second one while the run aborts, and exits 128 + the signal. With the handlers not installed, both signal tests fail and leave the run `running`).
+- **Pull requests:** [#46](https://github.com/ihsan-sa/npie/pull/46) (before it, only Ctrl-C took #44's abort path. Python has no handler for SIGTERM or SIGHUP, so a killed process, a job timeout or a dropped ssh session ended `npie_run.py` on the spot: the run stayed `running` with no report and, on a real bench, the supply on. Now `npie_run.main` turns either signal into a `KeyboardInterrupt` subclass for the length of the call, ignores a second one while the run aborts, and exits 128 + the signal. With the handlers not installed, both signal tests fail and leave the run `running`).
+
+### No number hides inline in a limit
+
+- **Serves:** Limits from the design
+- **Done when:** `make check VENV=/home/dispatch-w-npie/venvs/npie` passes with `tests/test_npie_limit_fields.py` reading procgen's source and finding no number other than 0 and 1 (and `round()`'s digits) inside a dict literal with a `nominal`, `min`, `max` or `edges_min` key, so the nudge in the same file reaches every number in a limit, with its `UNDISCLOSED` list still empty.
+- **Status:** done
+- **Pull requests:** the PR from `dispatch/47` (the limit-field goal nudged only module constants, and it said so. These numbers were written inline in limits: the 90 % current ceiling (four steps), the -5 %/+1 % of a rail following the input, the +/-5 % firmware vbus reading, the +/-3 % sense-amp offset, the 0.5 +/-0.05 bridge duty, the +/-2 % PWM frequency (two steps), the dead time's +1 ns round-up, the diode's 0.5 V nominal and the Hall check's 2 edges. The last two weren't written in `derived_from` at all. Each is now a constant, `derived_from` prints its value, and the nudge finds every one disclosed).
