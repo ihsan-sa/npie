@@ -68,8 +68,31 @@ def _spin(ws: Path) -> None:
     mf.write_text(json.dumps(m))
 
 
-@pytest.mark.parametrize("variant", [_mini_bldc, _no_manifest, _evn_header, _spin],
-                         ids=["mini-bldc", "no-manifest", "evn-header", "spin"])
+def _boost(ws: Path) -> None:
+    """A boost block and a manifest pwm block make Q1/Q2 a boost, so procgen
+    emits power-stage: closed loop, open loop, PWM, dead time and both trips."""
+    cp = ws / "kicad" / "constraints.json"
+    c = json.loads(cp.read_text())
+    c.setdefault("blocks", []).append({"topology": "boost", "block": "B2", "name": "Q1/Q2 boost"})
+    cp.write_text(json.dumps(c))
+    mf = ws / "firmware" / "fwe-manifest.json"
+    m = json.loads(mf.read_text())
+    m["pwm"] = {"freq_hz": 200000, "dead_time_ns": 50, "max_duty": 0.8,
+                "outputs": [{"role": "hrtim_lo", "net": "PHASE_A"},
+                            {"role": "hrtim_hi", "net": "PHASE_A"}]}
+    m["safety"].update({"vout_ov_v": 24.0, "vout_target_v": 20.0})
+    m["trips"] = [
+        {"name": "ovp", "sense_net": "VOUT_DIV", "threshold": 22.0, "unit": "V",
+         "comparator": "COMP1", "fault_input": "FLT1", "evt_regex": "^EVT .*ovp",
+         "outputs": "inactive", "latched": True, "clear": "clear"},
+        {"name": "ocp", "sense_net": "LS_SRC_A", "threshold": 8.0, "unit": "A",
+         "comparator": "COMP2", "fault_input": "FLT2", "evt_regex": "^EVT .*ocp",
+         "outputs": "inactive", "latched": True, "clear": "clear"}]
+    mf.write_text(json.dumps(m))
+
+
+@pytest.mark.parametrize("variant", [_mini_bldc, _no_manifest, _evn_header, _spin, _boost],
+                         ids=["mini-bldc", "no-manifest", "evn-header", "spin", "boost"])
 def test_every_limit_names_its_design_input(tmp_path, variant):
     ws = tmp_path / "mini-bldc"
     shutil.copytree(FIX, ws)
@@ -85,3 +108,17 @@ def test_every_limit_names_its_design_input(tmp_path, variant):
         elif not DESIGN_INPUT_RE.search(src):
             untraced.append(f"{s['id']} {s.get('text')!r}: {src!r}")
     assert not untraced, "limits that name no design input:\n" + "\n".join(untraced)
+
+
+def test_the_boost_variant_reaches_every_power_stage_check(tmp_path):
+    ws = tmp_path / "mini-bldc"
+    shutil.copytree(FIX, ws)
+    _boost(ws)
+    proc = procgen.generate(design.load(ws))
+    assert not [s for s in proc["skipped"] if s["stage"].startswith("power-stage")]
+    steps = next(st for st in proc["stages"] if st["id"] == "power-stage")["steps"]
+    texts = {s.get("text") for s in steps}
+    assert {"the voltage loop regulates the output", "PHASE_A PWM frequency",
+            "PHASE_A duty", "ovp trips on a real over-voltage",
+            "ocp trip reported"} <= texts
+    assert any(s.get("quantity") == "deadtime" for s in steps)
