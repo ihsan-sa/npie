@@ -80,6 +80,7 @@ What has landed, from the git history (a line per PR). A proposed goal that clos
 - [#87](https://github.com/ihsan-sa/npie/pull/87) Abort a resumed run whose supply isn't as the run left it
 - [#89](https://github.com/ihsan-sa/npie/pull/89) Abort a resumed run whose pwm or awg isn't as the run left it
 - [#91](https://github.com/ihsan-sa/npie/pull/91) Announce unsafe test hooks and the limits stage's D0 switching
+- [#93](https://github.com/ihsan-sa/npie/pull/93) Refuse --by sim on a live run and a non-finite typed reading
 
 ### Every limit names its design input
 
@@ -282,4 +283,11 @@ What has landed, from the git history (a line per PR). A proposed goal that clos
 - **Serves:** Safe anywhere
 - **Done when:** `make check VENV=/home/dispatch-w-npie/venvs/npie` passes with `tests/test_npie_confirm.py` finding, on a live run (fake SCPI supply) waiting on a person after the supply went on, `confirm --by sim` (any case, padded) refused with run.json unchanged, `npie_run.py confirm --by sim` exiting 2 and the same step then confirmed by a named person; and, on a held dry run of the EVN-header board at a typed reading, `--value` `nan`, `inf`, `-inf` and `1e999` refused with run.json unchanged, a finite reading then passing, and every person's step recorded with the name given.
 - **Status:** done
-- **Pull requests:** the PR from `dispatch/92` (SKILL.md's rule 2 says a human step is answered by a named person and a simulated run records its confirmations as `sim`. `confirm` took any non-blank `--by`, so a live run's step, the first power-up or the motor stage perhaps, could be confirmed `--by sim`, and the report then read as if nobody had done it. A typed `nan` was taken as a reading: it failed the run on a typo and went into run.json as `NaN`, which isn't JSON, and `inf` would pass any one-sided limit. `runner.confirm` now refuses both with nothing recorded, so the person answers again. With the runner change stashed, 9 of the 10 new tests fail).
+- **Pull requests:** [#93](https://github.com/ihsan-sa/npie/pull/93) (SKILL.md's rule 2 says a human step is answered by a named person and a simulated run records its confirmations as `sim`. `confirm` took any non-blank `--by`, so a live run's step, the first power-up or the motor stage perhaps, could be confirmed `--by sim`, and the report then read as if nobody had done it. A typed `nan` was taken as a reading: it failed the run on a typo and went into run.json as `NaN`, which isn't JSON, and `inf` would pass any one-sided limit. `runner.confirm` now refuses both with nothing recorded, so the person answers again. With the runner change stashed, 9 of the 10 new tests fail).
+
+### Every role is bound to its own driver
+
+- **Serves:** One driver layer
+- **Done when:** `make check VENV=/home/dispatch-w-npie/venvs/npie` passes with `tests/test_npie_bench_roles.py` finding that `instruments.SERVES` names one role for each LIVE driver and one driver for each sim role, as bench.example.yaml binds them; that every live driver has each public method of its sim twin, taking the sim's arguments; that `Bench.role` refuses a driver bound to another role before it holds anything; and that `runner.create` refuses a live bench that leaves out a role the procedure's steps use, binds it to another role's driver or to one npie lacks, with no run made, while it takes the bench example and a bench binding only the roles used. `tests/test_npie_run.py` finds `npie_run.py start` on an empty bench exiting 2 with no run.
+- **Status:** done
+- **Pull requests:** the PR from `dispatch/94` (`Bench.role` took any LIVE driver for any role, and nothing read bench.yaml before a step needed it. So a bench.yaml that left out the scope, or bound it to `scpi-dmm`, let a live run turn the supply on and then abort at its first scope step, and `test_npie_run` held that as the expected behaviour for a DMM missing. Each driver now names its role, and a live `start` is refused before the run exists, like a stale procedure. With the runner change reverted, 6 tests fail; with instruments.py reverted too, the new file can't load).
