@@ -37,8 +37,9 @@ under the board's `bringup/`.
 
 - Python 3.10+ with `requirements.txt` (pyyaml, sexpdata, matplotlib, numpy;
   pyvisa, pyvisa-py and pyserial for real instruments; pytest for the tests).
-- LuaLaTeX for the report PDF. Without it, `npie_report.py` still writes
-  `report.tex` and says why there is no PDF. The house style
+- LuaLaTeX for the report PDF in the house style. Without it,
+  `npie_report.py` writes `report.tex` and a plain text-only `report.pdf`,
+  and says why. The house style
   (`skill/reference/house-style/housestyle.sty`) and its fonts
   (`skill/assets/fonts`, SIL Open Font License) are vendored here, so nothing
   else needs installing. `NPIE_LUALATEX` and `NPIE_HOUSE_STYLE` override

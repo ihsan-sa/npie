@@ -268,14 +268,17 @@ first page with the failed step and the safe state it left; a limit a person
 set in `bringup/overrides.yaml` is called out on the first page too, beside
 the generated one it replaced. lualatex comes
 from `NPIE_LUALATEX` else PATH and the style from `NPIE_HOUSE_STYLE` else
-pdf-material-builder's skill dir; without either (or `--tex-only`) the
-script writes `report.tex` only and exits 1.
+pdf-material-builder's skill dir. Without either, or when the compile fails,
+`report.pdf` is a plain one: the `.tex`'s words in Courier, captures named
+but not drawn, written in pure Python with a first line saying why, and the
+script exits 1. So every host leaves a PDF. `--tex-only` writes `report.tex`
+alone and exits 1.
 
 `npie_run.py` calls the same builder whenever `start`, `confirm` or `resume`
 leaves a run, so no run goes unrecorded for want of someone asking: the
 `.tex` every time, the PDF once the run has ended (passed, failed or
-aborted), and its JSON says under `report` where they are or why there is no
-PDF. A run waiting on a person gets its PDF when it ends, or from
+aborted), and its JSON says under `report` where they are and, if the PDF is
+the plain one, why. A run waiting on a person gets its PDF when it ends, or from
 `npie_report.py --run R` before then. A report that fails to build is a
 warning, never the run's outcome.
 

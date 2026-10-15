@@ -29,13 +29,6 @@ Filed by runs. Each says what done looks like as something a run can check, and 
 - **Status:** open
 - **Pull requests:** [#54](https://github.com/ihsan-sa/npie/pull/54) (no host that runs the checks had lualatex, CI included, so every PDF assertion skipped and no check had ever compiled a report. CI now installs TeX Live and sets `NPIE_REQUIRE_PDF=1`. #54 is merged, but a run can't see CI, so the goal stays open until someone confirms the `check` workflow is green on main).
 
-### Every ended run leaves a PDF on any host
-
-- **Serves:** Every run on record
-- **Done when:** `make check VENV=/home/dispatch-w-npie/venvs/npie` passes with `tests/test_npie_run_report.py` finding a `report.pdf` that starts `%PDF-` in the run dir of every ended run (passed, failed, aborted, failed by a person), with or without lualatex on the host, and, with lualatex forced missing, a PDF whose xref points at each of its objects and whose text holds the run's status and failed step; and with `tests/test_npie_report_limits.py` finding every step's limit and `derived_from` in the plain report's text for every fixture variant.
-- **Status:** open
-- **Pull requests:** the PR from `dispatch/61`.
-
 ## Later
 
 Goals waiting for an open slot. When a proposed goal closes, the run that closed it moves the top one here up into Proposed goals as open.
@@ -71,6 +64,7 @@ What has landed, from the git history (a line per PR). A proposed goal that clos
 - [#54](https://github.com/ihsan-sa/npie/pull/54) Build every report PDF in CI and fail when lualatex is missing
 - [#56](https://github.com/ihsan-sa/npie/pull/56) Show every limit and its source in the run report
 - [#58](https://github.com/ihsan-sa/npie/pull/58) Abort a waiting run when its design changes before resume
+- [#60](https://github.com/ihsan-sa/npie/pull/60) Name the rail behind each current limit, not constraints power[]
 
 ### Every limit names its design input
 
@@ -161,4 +155,11 @@ What has landed, from the git history (a line per PR). A proposed goal that clos
 - **Serves:** Limits from the design
 - **Done when:** `make check VENV=/home/dispatch-w-npie/venvs/npie` passes with `tests/test_npie_limit_fields.py` finding, in every fixture variant, no step whose `derived_from` names a list without its entry (a bare `[]`, as in `constraints power[]`), and the first current limit and the idle current naming the `constraints power[<rail>]` entry they come from; and with `tests/test_npie_limit_trace.py` accepting `constraints <field>[...]` only with an entry in the brackets.
 - **Status:** done
-- **Pull requests:** the PR from `dispatch/59` (the trace regex took `constraints power[` as a design input, so `constraints power[]` passed. The first current limit, and the idle-current ceilings built on it (at power-up, while regulating, and at VIN min and max), said "limit from constraints power[]" and never named the rail. The full load is the heaviest rail's, not the rails' sum, and nothing said that either. They now name the rail and its watts and say "the heaviest rail". A rail that follows the input and the sense-amp offset also had a bare `voltages[]`, and now name their rails. Whether the full load should be a sum is the owner's call, so this PR doesn't change it).
+- **Pull requests:** [#60](https://github.com/ihsan-sa/npie/pull/60) (the trace regex took `constraints power[` as a design input, so `constraints power[]` passed. The first current limit, and the idle-current ceilings built on it (at power-up, while regulating, and at VIN min and max), said "limit from constraints power[]" and never named the rail. The full load is the heaviest rail's, not the rails' sum, and nothing said that either. They now name the rail and its watts and say "the heaviest rail". A rail that follows the input and the sense-amp offset also had a bare `voltages[]`, and now name their rails. Whether the full load should be a sum is the owner's call, so this PR doesn't change it).
+
+### Every ended run leaves a PDF on any host
+
+- **Serves:** Every run on record
+- **Done when:** `make check VENV=/home/dispatch-w-npie/venvs/npie` passes with `tests/test_npie_run_report.py` finding a `report.pdf` that starts `%PDF-` in the run dir of every ended run (passed, failed, aborted, failed by a person), with or without lualatex on the host, and, with lualatex forced missing, a PDF whose xref points at each of its objects and whose text holds the run's status and failed step; and with `tests/test_npie_report_limits.py` finding every step's limit and `derived_from` in the plain report's text for every fixture variant.
+- **Status:** done
+- **Pull requests:** the PR from `dispatch/61` (only a host with lualatex and the house style got a PDF. Anywhere else, which means every bench host without TeX Live and the host that runs these checks, an ended run left `report.tex` and no PDF, and a failed compile left none either. Now `npie_report.write()` falls back to a plain PDF: `plain_text()` turns the `.tex` back into words, and `plain_pdf()` sets them in Courier on A4, in pure Python with no font embedded. Its first line says why it is plain. `ok` stays false and the exit stays 1, so a house-style PDF is still what CI's `NPIE_REQUIRE_PDF` holds to).
