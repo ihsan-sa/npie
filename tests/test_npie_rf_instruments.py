@@ -12,9 +12,10 @@ from pathlib import Path
 
 import pytest
 
-from test_npie_run import NPIE, _record, _run, _ws
+from test_npie_run import NPIE, _ws
 
 sys.path.insert(0, str(NPIE))
+from npielib import runner  # noqa: E402
 from npielib.instruments import (BenchError, Pwm8, Pwm8Gateware, ScpiSdg,  # noqa: E402
                                  SdgModel)
 
@@ -151,23 +152,34 @@ def _rf_stage(ws: Path, pwm_set: dict) -> None:
     pj.write_text(json.dumps(proc))
 
 
-def test_run_drives_the_pwm_and_awg_and_scopes_f_rf(tmp_path):
+def hand_written(monkeypatch) -> None:
+    """Let a run take the rf-drive stage: procgen makes no awg step, so the
+    stage is hand-written, which runner.not_generated would refuse."""
+    monkeypatch.setattr(runner, "not_generated", lambda proc, ws: [])
+
+
+def _dry_run(ws: Path, monkeypatch) -> runner.Run:
+    hand_written(monkeypatch)
+    run = runner.create(ws, bench="sim", bench_cfg=None, label=None, faults=[], hold=False)
+    return runner.advance(run)
+
+
+def test_run_drives_the_pwm_and_awg_and_scopes_f_rf(tmp_path, monkeypatch):
     ws = _ws(tmp_path)
     _rf_stage(ws, {"f_hz": 13.56e6, "duty": 0.5, "phase_deg": {"4": 180}, "enable": True})
-    rc, out = _run("start", "--workspace", str(ws), "--dry-run")
-    assert rc == 0 and out["status"] == "passed", out
-    by = {r["id"]: r for r in _record(out)["steps"]}
+    rec = _dry_run(ws, monkeypatch).rec
+    assert rec["status"] == "passed", rec.get("error")
+    by = {r["id"]: r for r in rec["steps"]}
     assert by["rf-drive.02"]["applied"]["phase_deg"][4] == 180.0
     assert by["rf-drive.03"]["value"] == pytest.approx(13.56e6, rel=1e-3)
     assert by["rf-drive.04"]["applied"]["output"] is True
 
 
-def test_run_with_a_frequency_the_bitstream_lacks_aborts_safe(tmp_path):
+def test_run_with_a_frequency_the_bitstream_lacks_aborts_safe(tmp_path, monkeypatch):
     ws = _ws(tmp_path)
     _rf_stage(ws, {"f_hz": 6.78e6, "duty": 0.5, "enable": True})
-    rc, out = _run("start", "--workspace", str(ws), "--dry-run")
-    assert out["status"] == "aborted", out
-    rec = _record(out)
+    rec = _dry_run(ws, monkeypatch).rec
+    assert rec["status"] == "aborted", rec
     assert rec["error"].startswith("rf-drive.02:") and "fixes f" in rec["error"]
     assert rec["safe_state"].startswith("supply outputs off")
     assert rec["steps"][-1]["id"] == "rf-drive.01"

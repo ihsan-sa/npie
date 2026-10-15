@@ -23,7 +23,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import design, instruments
+from . import design, instruments, procgen
 
 SCHEMA = "npie-run/1"
 SIM_PICKLE = "sim-board.pickle"
@@ -50,14 +50,42 @@ def stale_inputs(proc: dict, ws: Path) -> list[str]:
                   if cur.get(n, {}).get("sha256") != proc.get("inputs", {}).get(n, {}).get("sha256"))
 
 
+def not_generated(proc: dict, ws: Path) -> list[str]:
+    """Where a procedure is not what procedure_gen.py makes from the design
+    now: the steps that differ, appeared or vanished, then any other part
+    (`stages` for their order or titles). Limits are generated, not
+    hand-written (reference/design.md section 2), and the input hashes alone
+    don't show a procedure an older npie wrote (say one whose open-loop D0
+    sat past a trip) or one edited by hand."""
+    gen = json.loads(json.dumps(procgen.generate(design.load(ws))))
+    a = {s["id"]: s for s in _steps(proc)}
+    b = {s["id"]: s for s in _steps(gen)}
+    out = sorted(i for i in set(a) | set(b) if a.get(i) != b.get(i))
+    out += sorted(k for k in (set(proc) | set(gen)) - {"generated", "stages"}
+                  if proc.get(k) != gen.get(k))
+
+    def shape(p):
+        return [(st["id"], st["title"], [s["id"] for s in st["steps"]]) for st in p["stages"]]
+    if shape(proc) != shape(gen):
+        out.append("stages")
+    return out
+
+
 def _abort_if_stale(run: "Run") -> bool:
-    """A run that waited on a person while the design changed would go on
-    against limits the design no longer gives: abort it, supply off."""
+    """A run that waited on a person while the design, or the npie that
+    generated its procedure, changed would go on against limits they no
+    longer give: abort it, supply off."""
     stale = stale_inputs(run.proc, run.ws)
-    if not stale:
-        return False
-    run.rec["error"] = (f"{run.rec['cursor']}: design inputs changed since the run started ("
-                        + ", ".join(stale) + "); rerun procedure_gen.py and start a new run")
+    if stale:
+        why = ("design inputs changed since the run started (" + ", ".join(stale) + ")")
+    else:
+        changed = not_generated(run.proc, run.ws)
+        if not changed:
+            return False
+        why = ("procedure.json is no longer what procedure_gen.py makes from the "
+               "design (" + ", ".join(changed) + ")")
+    run.rec["error"] = (f"{run.rec['cursor']}: {why}; rerun procedure_gen.py "
+                        "and start a new run")
     run.finish("aborted", "design changed")
     return True
 
@@ -166,6 +194,11 @@ def create(ws: Path, *, bench: str, bench_cfg: dict | None, label: str | None,
     if stale:
         raise RunError("procedure.json is stale (changed since it was generated: "
                        + ", ".join(stale) + "); rerun procedure_gen.py")
+    changed = not_generated(proc, ws)
+    if changed:
+        raise RunError("procedure.json is not what procedure_gen.py makes from this "
+                       "design now (written by an older npie, or edited: "
+                       + ", ".join(changed) + "); rerun procedure_gen.py")
     probed = {p["net"] for s in _steps(proc) for p in (s.get("points") or {}).values()}
     for f in faults or []:
         kind, _, arg = f.partition(":")

@@ -33,7 +33,7 @@ import procedure_gen  # noqa: E402
 from npielib import runner  # noqa: E402
 from test_npie_limit_trace import FIX  # noqa: E402
 from test_npie_rated_input import ALL  # noqa: E402
-from test_npie_rf_instruments import _rf_stage  # noqa: E402
+from test_npie_rf_instruments import _rf_stage, hand_written  # noqa: E402
 
 
 def _no_range(ws: Path) -> None:
@@ -77,9 +77,10 @@ def test_a_passed_run_leaves_the_supply_off(tmp_path, capsys, variant):
     assert run.rec["safe_state"].startswith("supply outputs off"), run.rec["safe_state"]
 
 
-def test_a_passed_run_turns_off_the_sources_it_drove(tmp_path, capsys):
+def test_a_passed_run_turns_off_the_sources_it_drove(tmp_path, capsys, monkeypatch):
     ws = _ws(tmp_path, lambda ws: None)
     _rf_stage(ws, {"f_hz": 13.56e6, "duty": 0.5, "phase_deg": {"4": 180}, "enable": True})
+    hand_written(monkeypatch)
     run = _run_to_end(ws)
     board = run.bench.sim
     by = {r["id"]: r for r in run.rec["steps"]}

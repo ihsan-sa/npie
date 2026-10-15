@@ -257,8 +257,9 @@ def test_out_of_limit_value_turns_the_supply_off(tmp_path):
     run.open_bench()
     runner.advance(run)
     assert run.rec["status"] == "awaiting_human"
-    s = run.steps[run.index(run.rec["cursor"])]
-    s.update(value={"unit": "V"}, expect={"min": 4.9, "max": 5.1, "unit": "V"})
+    i = run.index(run.rec["cursor"])    # a copy: run.proc stays the generated procedure
+    s = run.steps[i] = {**run.steps[i], "value": {"unit": "V"},
+                        "expect": {"min": 4.9, "max": 5.1, "unit": "V"}}
     runner.confirm(run, s["id"], "ihsan", "12", None)
     assert run.rec["status"] == "failed" and runner.exit_code(run) == 1
     assert run.rec["steps"][-1]["verdict"] == "fail" and run.rec["steps"][-1]["value"] == 12.0
@@ -273,8 +274,9 @@ def test_in_limit_value_passes_and_keeps_waiting_for_resume(tmp_path):
                         hold=True, seed=1)
     run.open_bench()
     runner.advance(run)
-    s = run.steps[run.index(run.rec["cursor"])]
-    s.update(value={"unit": "V"}, expect={"min": 4.9, "max": 5.1, "unit": "V"})
+    i = run.index(run.rec["cursor"])    # a copy: run.proc stays the generated procedure
+    s = run.steps[i] = {**run.steps[i], "value": {"unit": "V"},
+                        "expect": {"min": 4.9, "max": 5.1, "unit": "V"}}
     runner.confirm(run, s["id"], "ihsan", "5.0", None)
     assert run.rec["status"] == "awaiting_human" and run.rec["steps"][-1]["verdict"] == "pass"
     assert not run.rec.get("safe_state")
