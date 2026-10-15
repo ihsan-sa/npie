@@ -270,6 +270,12 @@ roles:
   awg:     {driver: scpi-sdg, resource: "TCPIP0::192.168.1.60::INSTR"}
 ```
 
+Each driver speaks one role (`instruments.SERVES`) and takes the calls its
+sim twin does. A live `start` is refused, with no run made, unless
+bench.yaml binds every role the procedure's steps use to that role's driver,
+so a missing or mis-wired instrument stops the run before power-up, not at
+its first step. Roles the procedure doesn't use need no line.
+
 Drivers (`scripts/npielib/instruments.py`), each a small class per role:
 
 - **scpi-*** over pyvisa. A generic SCPI set per role (`MEAS:VOLT:DC?`,

@@ -41,6 +41,11 @@ from test_npie_limit_trace import (FIX, _boost, _evn_header, _hall,  # noqa: E40
                                    _mini_bldc, _no_manifest, _spin)
 from test_npie_rf_instruments import _rf_stage  # noqa: E402
 
+# every role bound as bench.example.yaml binds it: a live run is refused a
+# bench that leaves out a role its procedure uses, so a test that drives one
+# instrument binds the others too (opened only if a step uses them)
+EXAMPLE_ROLES = {r: yaml.safe_load(line) for r, line in procedure_gen.BENCH_EXAMPLE.items()}
+
 
 def _rf(ws: Path) -> None:
     pass        # the stage is added to the generated procedure, in _procedure

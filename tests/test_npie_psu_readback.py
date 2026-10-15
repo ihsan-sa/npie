@@ -27,9 +27,10 @@ if str(NPIE) not in sys.path:
 
 import procedure_gen  # noqa: E402
 from npielib import instruments, runner  # noqa: E402
-from test_npie_live_drivers import FIX, PsuModel, _Visa  # noqa: E402
+from test_npie_live_drivers import EXAMPLE_ROLES, FIX, PsuModel, _Visa  # noqa: E402
 
-CFG = {"bench": "t", "roles": {"psu": {"driver": "scpi-psu", "resource": "TCPIP::psu",
+CFG = {"bench": "t", "roles": {**EXAMPLE_ROLES,
+                               "psu": {"driver": "scpi-psu", "resource": "TCPIP::psu",
                                        "channel": 2}}}
 
 

@@ -29,10 +29,11 @@ if str(NPIE) not in sys.path:
 
 import procedure_gen  # noqa: E402
 from npielib import instruments, runner  # noqa: E402
-from test_npie_live_drivers import FIX, _Visa  # noqa: E402
+from test_npie_live_drivers import EXAMPLE_ROLES, FIX, _Visa  # noqa: E402
 from test_npie_rf_instruments import _rf_stage, hand_written  # noqa: E402
 
 CFG = {"bench": "t", "roles": {
+    **EXAMPLE_ROLES,
     "psu": {"driver": "scpi-psu", "resource": "TCPIP::psu", "channel": 1},
     "pwm": {"driver": "fwe-pwm8", "port": "/dev/ttyPWM", "f_rf_hz": 13.56e6},
     "awg": {"driver": "scpi-sdg", "resource": "TCPIP::awg"},

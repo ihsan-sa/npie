@@ -319,6 +319,14 @@ def create(ws: Path, *, bench: str, bench_cfg: dict | None, label: str | None,
         raise RunError("procedure.json is not what procedure_gen.py makes from this "
                        "design now (written by an older npie, or edited: "
                        + ", ".join(changed) + "); rerun procedure_gen.py")
+    if bench != "sim":
+        # before the first step: a role found missing at its own step would
+        # stop a run that has already powered the board
+        wrong = instruments.bench_problems(bench_cfg, {s["role"] for s in _steps(proc)
+                                                       if s.get("role") and s["type"] != "human"})
+        if wrong:
+            raise RunError("bench.yaml can't drive this procedure (" + "; ".join(wrong)
+                           + "); bind each role to its driver, as bench.example.yaml does")
     probed = {p["net"] for s in _steps(proc) for p in (s.get("points") or {}).values()}
     for f in faults or []:
         kind, _, arg = f.partition(":")
