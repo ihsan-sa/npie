@@ -84,6 +84,18 @@ OVP_OVERSHOOT = 1.05
 INJECT_R_OHM = 100
 INJECT_ILIM_A = 0.02
 TRIP_SETTLE_S = 10.0        # a tripped, unloaded output bleeds down through its divider
+VIN_HEADROOM_V = 2.0        # first power above the operating minimum
+VIN_NO_RANGE_FRAC = 0.5     # of the input rating, when requirements give no range
+ILIM_LOAD_X = 2.0           # first current limit, x the full-load estimate
+ILIM_FLOOR_A = 0.05
+VIO_DEFAULT_V = 3.3         # an EVN header block with no operating_point.vio_v
+D0_AIM_FRAC = 0.5           # of the output over-voltage level
+DUTY_MIN = 0.05
+DUTY_MAX_DEFAULT = 0.9      # a manifest pwm block with no max_duty
+OV_AIM_RATING_FRAC = 0.97   # an over-voltage aim stays under the output's rating
+VDDA_DEFAULT_V = 3.3        # an injection stops here with no /VDDA or +3V3 rail
+SPIN_V_DEFAULT = 12.0       # first spin without a power-up stage
+UV_UNDERSHOOT_V = 0.5       # the supply goes this far under the under-voltage trip
 
 EVN_HEADER_RE = re.compile(r"\bEVN JP8\b")
 EVN_V_PINS, EVN_GND_PINS = ("1", "17"), ("6", "9")   # JP8, Raspberry Pi numbering
@@ -310,8 +322,10 @@ class _Builder:
             return
         self.stage("host-link", "EVN host link (before this board's first power)")
         j = hdr["name"].split()[0]
-        vio = float((hdr.get("operating_point") or {}).get("vio_v", 3.3))
+        op = hdr.get("operating_point") or {}
+        vio = float(op.get("vio_v", VIO_DEFAULT_V))
         src = f"constraints blocks[{hdr.get('block', '?')}] {hdr['name']}"
+        vio_src = "vio_v" if "vio_v" in op else "no vio_v, procgen default VIO_DEFAULT_V"
         self.human("EVN unplugged from USB and from this board. Check the host-link "
                    "rework on the LFE5UM5G-85F-EVN: R34 and R35 fitted as 0R, and R22 "
                    "and R23 still fitted (they carry I2C; do not remove them).",
@@ -342,7 +356,7 @@ class _Builder:
                            f"the EVN's GND (its USB shell). Type the reading ({what}).",
                            value={"unit": "V"},
                            expect={"nominal": nom, "min": lo, "max": hi, "unit": "V"},
-                           derived_from=f"{src}: JP8 pin {pin} is {what}, vio_v "
+                           derived_from=f"{src}: JP8 pin {pin} is {what}, {vio_src} "
                                         f"{vio:g} V +/-{tol * 100:g} %")
 
     def power_up(self):
@@ -352,20 +366,23 @@ class _Builder:
             self.skip("power-up", "no input net found in constraints voltages[]")
             return
         if d.vin_range:
-            v = min(d.vin_range[0] + 2.0, d.vin_range[1])
-            v_src = f"requirements VIN {d.vin_range[0]:g}-{d.vin_range[1]:g} V: min + 2 V"
+            v = min(d.vin_range[0] + VIN_HEADROOM_V, d.vin_range[1])
+            v_src = (f"requirements VIN {d.vin_range[0]:g}-{d.vin_range[1]:g} V: "
+                     f"min + {VIN_HEADROOM_V:g} V")
         else:
-            v = round(d.voltages[self.input] / 2.0, 1)
-            v_src = "no operating range in requirements: half the input rating"
+            v = round(d.voltages[self.input] * VIN_NO_RANGE_FRAC, 1)
+            v_src = (f"no operating range in requirements: {VIN_NO_RANGE_FRAC:g}x "
+                     f"constraints voltages[{_short(self.input)}]")
         load_w = max((r["v"] * self._rail_current(r["net"]) for r in self.rails
                       if not r["follows_input"]), default=0.0)
         full_a = load_w / EFFICIENCY / v
-        ilim = min(FIRST_ILIMIT_A, max(0.05, round(2 * full_a, 2)))
+        ilim = min(FIRST_ILIMIT_A, max(ILIM_FLOOR_A, round(ILIM_LOAD_X * full_a, 2)))
         self.v_first, self.ilim = v, ilim
+        self.setpoint = f"the supply setpoint {v:g} V ({v_src})"
         inp, g = self.point(self.input), self.point(self.gnd)
         self.step("supply", role="psu", set={"v": v, "i_limit": ilim, "output": False},
-                  derived_from=f"{v_src}; limit min({FIRST_ILIMIT_A} A, 2x full load "
-                               f"{full_a:.3f} A)")
+                  derived_from=f"{v_src}; limit min({FIRST_ILIMIT_A} A, max({ILIM_FLOOR_A} A, "
+                               f"{ILIM_LOAD_X:g}x full load {full_a:.3f} A))")
         self.human(f"Connect the supply: + to {inp['label']}, - to {g['label']}. "
                    f"Supply set to {v:g} V / {ilim:g} A, output still off.")
         self.human(f"About to switch the supply on at {v:g} V with a {ilim:g} A limit. "
@@ -400,14 +417,15 @@ class _Builder:
                 exp = {"nominal": nom, "min": round(nom - BOOST_IDLE_DROP_V, 3),
                        "max": round(nom * (1 + above), 3), "unit": "V"}
                 src = (f"idle boost output follows the input through netlist "
-                       f"{self.boost['ic']}'s high side: setpoint -{BOOST_IDLE_DROP_V:g} V/"
-                       f"+{above * 100:g} %")
+                       f"{self.boost['ic']}'s high side: {self.setpoint} "
+                       f"-{BOOST_IDLE_DROP_V:g} V/+{above * 100:g} %")
             elif r["follows_input"]:
                 nom = self.v_first
                 exp = {"nominal": nom, "min": round(nom * (1 - below), 3),
                        "max": round(nom * (1 + above), 3), "unit": "V"}
                 src = (f"follows the input (constraints voltages[] rated like "
-                       f"{_short(self.input)}): setpoint -{below * 100:g} %/+{above * 100:g} %")
+                       f"{_short(self.input)}): {self.setpoint} "
+                       f"-{below * 100:g} %/+{above * 100:g} %")
             else:
                 tol = TOL_ASYNC if r["async"] else TOL_REG
                 nom = r["v"]
@@ -474,7 +492,7 @@ class _Builder:
                       fields={"vbus_v": {"nominal": v, "min": round(v * (1 - VBUS_READ_TOL), 3),
                                          "max": round(v * (1 + VBUS_READ_TOL), 3), "unit": "V"}},
                       derived_from="manifest commands[status].reply_fields vbus_v "
-                                   f"vs the supply setting +/-{VBUS_READ_TOL * 100:g}%",
+                                   f"vs {self.setpoint} +/-{VBUS_READ_TOL * 100:g}%",
                       text="firmware reads the input voltage")
         for u in d.refs("U"):
             f = {p["func"]: p["net"] for p in d.pins_of(u)}
@@ -571,10 +589,15 @@ class _Builder:
                 return f"{j} pins " + ", ".join(sorted((p["pin"] for p in pins), key=int))
         return "the sensor connector"
 
+    def _max_duty(self) -> tuple[float, str]:
+        mx = (self.d.manifest or {}).get("pwm", {}).get("max_duty")
+        if mx:
+            return float(mx), "manifest pwm.max_duty"
+        return DUTY_MAX_DEFAULT, "no pwm.max_duty, procgen default DUTY_MAX_DEFAULT"
+
     def _open_duty(self, v_in: float, v_out: float) -> float:
         """The open-loop duty whose ideal synchronous-boost output is v_out."""
-        mx = float((self.d.manifest or {}).get("pwm", {}).get("max_duty") or 0.9)
-        return round(min(mx, max(0.05, 1.0 - v_in / v_out)), 3)
+        return round(min(self._max_duty()[0], max(DUTY_MIN, 1.0 - v_in / v_out)), 3)
 
     def power_stage(self):
         """A boost's switching tests: closed loop, open loop, then every trip."""
@@ -603,11 +626,12 @@ class _Builder:
                                      "(safety.vout_ov_v), so no safe open-loop duty")
             self.stages.pop()
             return
-        d0 = self._open_duty(vin, ov / 2)
+        d0 = self._open_duty(vin, ov * D0_AIM_FRAC)
         v0 = vin / (1 - d0)
-        d0_src = (f"D0 = 1 - {vin:g} V / ({ov:g} V / 2), kept within 0.05 and manifest "
-                  f"pwm.max_duty: half the output over-voltage level ({ov_src}), "
-                  f"synchronous boost Vout = Vin/(1-D)")
+        mx, mx_src = self._max_duty()
+        d0_src = (f"D0 = 1 - {vin:g} V / ({D0_AIM_FRAC:g}x {ov:g} V), kept within "
+                  f"{DUTY_MIN:g} and {mx_src} {mx:g}: {D0_AIM_FRAC:g}x the output "
+                  f"over-voltage level ({ov_src}), synchronous boost Vout = Vin/(1-D)")
         self.human(f"Output open: nothing on {bst['out']}'s connectors. The next steps switch "
                    f"{bst['ic']} at {pwm.get('freq_hz', 0) / 1e6:g} MHz from the {vin:g} V "
                    f"supply; the output reaches {ov:g} V in the over-voltage test. Hands clear.")
@@ -643,7 +667,7 @@ class _Builder:
                   expect={"nominal": round(v0, 3), "min": round(v0 * (1 - VOUT_TOL_OPEN), 3),
                           "max": round(v0 * (1 + VOUT_TOL_OPEN), 3), "unit": "V"},
                   derived_from=f"duty to Vout: {vin:g} V / (1 - {d0:g}) = {v0:.2f} V "
-                               f"+/-{VOUT_TOL_OPEN * 100:g} %, D0 from {ov_src}",
+                               f"+/-{VOUT_TOL_OPEN * 100:g} %, {d0_src}",
                   text=f"{_short(bst['out'])} follows the duty")
         outs = {o.get("role"): o.get("net") for o in pwm.get("outputs", [])}
         lo = self.point(self._net(outs.get("hrtim_lo")) or bst["sw"])
@@ -664,8 +688,8 @@ class _Builder:
                   points={"plus": lo, "minus": g}, screenshot=True,
                   expect={"nominal": d0, "min": round(d0 - DUTY_TOL, 3),
                           "max": round(d0 + DUTY_TOL, 3), "unit": ""},
-                  derived_from=f"D0 = {d0:g} from {ov_src}, as commanded with manifest "
-                               f"commands[duty], +/-{DUTY_TOL:g} (the low side is on for D)",
+                  derived_from=f"D0 = {d0:g} as commanded with manifest commands[duty], "
+                               f"+/-{DUTY_TOL:g} (the low side is on for D); {d0_src}",
                   text=f"{_short(lo['net'])} duty")
         if dt:
             self.step("scope", role="scope", channel=1, channel2=2, quantity="deadtime",
@@ -679,14 +703,15 @@ class _Builder:
         self.step("console", role="console", send="disarm", expect_re="^OK ", timeout_s=2,
                   derived_from="manifest commands[disarm]")
         rating = d.voltages.get(bst["out"])
-        vdda = d.voltages.get("/VDDA") or d.voltages.get("+3V3") or 3.3
+        vdda = d.voltages.get("/VDDA") or d.voltages.get("+3V3") or VDDA_DEFAULT_V
         for t in m.get("trips", []):
             name, thr, unit = t["name"], float(t["threshold"]), t.get("unit", "")
             tsrc = (f"manifest trips[{name}]: {t.get('comparator', '?')} -> "
                     f"{t.get('fault_input', '?')} at {thr:g} {unit}")
             by_duty = unit == "V" and "OUT" in str(t.get("sense_net", "")).upper()
             if by_duty:
-                aim = min(thr * OVP_OVERSHOOT, 0.97 * rating) if rating else thr * OVP_OVERSHOOT
+                aim = (min(thr * OVP_OVERSHOOT, OV_AIM_RATING_FRAC * rating) if rating
+                       else thr * OVP_OVERSHOOT)
                 dt_ = self._open_duty(vin, aim)
                 if aim <= thr or vin / (1 - dt_) <= thr:
                     self.skip(f"power-stage:{name}", f"no duty up to pwm.max_duty and no "
@@ -704,7 +729,7 @@ class _Builder:
                           expect_re=t["evt_regex"], timeout_s=5,
                           derived_from=f"{tsrc}; duty aimed at {vin:g}/(1-{dt_:g}) = "
                                        f"{vin / (1 - dt_):.1f} V, {OVP_OVERSHOOT:g}x the "
-                                       f"trip and under 97 % of the "
+                                       f"trip and under {OV_AIM_RATING_FRAC * 100:g} % of the "
                                        f"{_short(bst['out'])} rating",
                           text=f"{name} trips on a real over-voltage")
             else:
@@ -752,7 +777,7 @@ class _Builder:
                                        f"{(self.d.manifest or {}).get('stage', 'none')})")
             self.stages.pop()
             return
-        v = getattr(self, "v_first", 12.0)
+        v = getattr(self, "v_first", SPIN_V_DEFAULT)
         ilim, src = self.bench_limit("spin_current_a", SPIN_ILIMIT_A, "SPIN_ILIMIT_A")
         self.human("Motor connected to the phase outputs, shaft free and clamped. "
                    f"The next steps spin it at {v:g} V with a {ilim:g} A limit.")
@@ -800,7 +825,7 @@ class _Builder:
             d0 = None
             if self.boost and "power-stage" in {st["id"] for st in self.stages}:
                 ov = saf.get("vout_ov_v")
-                d0 = self._open_duty(self.v_first, ov / 2) if ov else None
+                d0 = self._open_duty(self.v_first, ov * D0_AIM_FRAC) if ov else None
             if d0 is not None:
                 self.step("supply", role="psu",
                           set={"v": self.v_first, "i_limit": self.ilim, "output": True},
@@ -809,8 +834,9 @@ class _Builder:
                           timeout_s=2, derived_from="the firmware latches input trips only "
                                                     "while switching: open loop at D0")
             self.step("supply", role="psu",
-                      set={"v": round(uv - 0.5, 2), "i_limit": self.ilim, "output": True},
-                      derived_from=f"manifest safety.vbus_uv_v {uv:g} V - 0.5 V")
+                      set={"v": round(uv - UV_UNDERSHOOT_V, 2), "i_limit": self.ilim,
+                           "output": True},
+                      derived_from=f"manifest safety.vbus_uv_v {uv:g} V - {UV_UNDERSHOOT_V:g} V")
             self.step("console", role="console", send=None, expect_re=r"^EVT .*uv",
                       timeout_s=5, derived_from="under-voltage trip reported",
                       text=f"UV trip below {uv:g} V")

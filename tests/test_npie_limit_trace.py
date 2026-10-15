@@ -144,10 +144,42 @@ def _boost_out(ws: Path) -> None:
     cp.write_text(json.dumps(c))
 
 
+def _boost_low(ws: Path) -> None:
+    """The boost with its over-voltage level at twice the input, so D0 is held
+    up at procgen's DUTY_MIN."""
+    _boost(ws)
+    mf = ws / "firmware" / "fwe-manifest.json"
+    m = json.loads(mf.read_text())
+    m["safety"]["vout_ov_v"] = 20.0
+    mf.write_text(json.dumps(m))
+
+
+def _fallbacks(ws: Path) -> None:
+    """Every input procgen falls back from: an EVN header with no vio_v, no
+    operating range in requirements.md (the setpoint is half the input rating),
+    a load light enough that the first current limit sits on ILIM_FLOOR_A, and
+    a boost with no pwm.max_duty whose over-voltage level asks for more duty
+    than DUTY_MAX_DEFAULT."""
+    _boost(ws)
+    cp = ws / "kicad" / "constraints.json"
+    c = json.loads(cp.read_text())
+    c["blocks"].append({k: v for k, v in EVN_BLOCK.items() if k != "operating_point"})
+    for p in c["power"]:
+        if p["net"] in ("+5V", "+3V3"):
+            p["current_a"] = 0.001
+    cp.write_text(json.dumps(c))
+    (ws / "requirements.md").write_text("# mini\n")
+    mf = ws / "firmware" / "fwe-manifest.json"
+    m = json.loads(mf.read_text())
+    del m["pwm"]["max_duty"]
+    m["safety"]["vout_ov_v"] = 400.0
+    mf.write_text(json.dumps(m))
+
+
 @pytest.mark.parametrize("variant", [_mini_bldc, _no_manifest, _evn_header, _spin, _boost,
-                                     _rails, _boost_out],
+                                     _rails, _boost_out, _boost_low],
                          ids=["mini-bldc", "no-manifest", "evn-header", "spin", "boost",
-                              "rails", "boost-out"])
+                              "rails", "boost-out", "boost-low"])
 def test_every_limit_names_its_design_input(tmp_path, variant):
     ws = tmp_path / "mini-bldc"
     shutil.copytree(FIX, ws)
@@ -206,6 +238,25 @@ def test_without_bringup_the_defaults_say_so(tmp_path):
     spin = _limit(proc, "spin current")
     assert spin["expect"]["max"] == 0.9
     assert "procgen default SPIN_ILIMIT_A" in spin["derived_from"]
+
+
+def test_the_fallbacks_say_so(tmp_path):
+    ws = tmp_path / "mini-bldc"
+    shutil.copytree(FIX, ws)
+    _fallbacks(ws)
+    proc = procgen.generate(design.load(ws))
+    pins = [s for st in proc["stages"] if st["id"] == "host-link" for s in st["steps"]
+            if s.get("expect")]
+    assert pins and all("procgen default VIO_DEFAULT_V" in s["derived_from"] for s in pins)
+    assert pins[0]["expect"]["nominal"] == procgen.VIO_DEFAULT_V
+    vbus = _limit(proc, "firmware reads the input voltage")
+    assert vbus["fields"]["vbus_v"]["nominal"] == 15
+    assert "constraints voltages[VM_IN]" in vbus["derived_from"]
+    idle = _limit(proc, "idle input current")
+    assert idle["expect"]["max"] == round(procgen.ILIM_CEIL_FRAC * procgen.ILIM_FLOOR_A, 4)
+    duty = _limit(proc, "PHASE_A duty")
+    assert duty["expect"]["nominal"] == procgen.DUTY_MAX_DEFAULT
+    assert "procgen default DUTY_MAX_DEFAULT" in duty["derived_from"]
 
 
 def test_the_boost_variant_reaches_every_power_stage_check(tmp_path):
