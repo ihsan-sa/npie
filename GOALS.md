@@ -65,6 +65,7 @@ What has landed, from the git history (a line per PR). A proposed goal that clos
 - [#56](https://github.com/ihsan-sa/npie/pull/56) Show every limit and its source in the run report
 - [#58](https://github.com/ihsan-sa/npie/pull/58) Abort a waiting run when its design changes before resume
 - [#60](https://github.com/ihsan-sa/npie/pull/60) Name the rail behind each current limit, not constraints power[]
+- [#62](https://github.com/ihsan-sa/npie/pull/62) Close the PDF-on-any-host goal; update docs and run notes
 
 ### Every limit names its design input
 
@@ -162,4 +163,11 @@ What has landed, from the git history (a line per PR). A proposed goal that clos
 - **Serves:** Every run on record
 - **Done when:** `make check VENV=/home/dispatch-w-npie/venvs/npie` passes with `tests/test_npie_run_report.py` finding a `report.pdf` that starts `%PDF-` in the run dir of every ended run (passed, failed, aborted, failed by a person), with or without lualatex on the host, and, with lualatex forced missing, a PDF whose xref points at each of its objects and whose text holds the run's status and failed step; and with `tests/test_npie_report_limits.py` finding every step's limit and `derived_from` in the plain report's text for every fixture variant.
 - **Status:** done
-- **Pull requests:** the PR from `dispatch/61` (only a host with lualatex and the house style got a PDF. Anywhere else, which means every bench host without TeX Live and the host that runs these checks, an ended run left `report.tex` and no PDF, and a failed compile left none either. Now `npie_report.write()` falls back to a plain PDF: `plain_text()` turns the `.tex` back into words, and `plain_pdf()` sets them in Courier on A4, in pure Python with no font embedded. Its first line says why it is plain. `ok` stays false and the exit stays 1, so a house-style PDF is still what CI's `NPIE_REQUIRE_PDF` holds to).
+- **Pull requests:** [#62](https://github.com/ihsan-sa/npie/pull/62) (only a host with lualatex and the house style got a PDF. Anywhere else, which means every bench host without TeX Live and the host that runs these checks, an ended run left `report.tex` and no PDF, and a failed compile left none either. Now `npie_report.write()` falls back to a plain PDF: `plain_text()` turns the `.tex` back into words, and `plain_pdf()` sets them in Courier on A4, in pure Python with no font embedded. Its first line says why it is plain. `ok` stays false and the exit stays 1, so a house-style PDF is still what CI's `NPIE_REQUIRE_PDF` holds to).
+
+### No supply setpoint above the input's rating
+
+- **Serves:** Limits from the design
+- **Done when:** `make check VENV=/home/dispatch-w-npie/venvs/npie` passes with `tests/test_npie_rated_input.py` generating every fixture variant of `tests/test_npie_limit_fields.py`, plus a requirements VIN range that tops out above the input's rating in constraints `voltages[]`, one whose first power is already above it, and a board with no input net whose firmware can spin, and finding no `supply` step above the input's rating or the requirements' VIN max; the over-rated corner and first power listed in `skipped` with both numbers; and no supply step at all, full-function included, when there is no input net.
+- **Status:** done
+- **Pull requests:** the PR from `dispatch/63` (procgen took the first power and the VIN corners from requirements.md alone and never compared them with the input's rating in constraints, so "Input 8-40 V operating" on a 30 V-rated input gave a 40 V supply step, against SKILL.md's rule 4. With no input net, full-function spun the motor at a 12 V procgen constant (`SPIN_V_DEFAULT`) that no design input gave. Now `_Builder.over_rating` holds each of those setpoints to the rating, and a setpoint above it is listed as not applied. Full-function needs the power-up stage's setpoint, and `SPIN_V_DEFAULT` is gone).

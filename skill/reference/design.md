@@ -119,7 +119,10 @@ each limit comes from:
    block the check runs while switching at D0, because it latches input
    trips only then. Nothing above the rated
    maximum input is applied; over-voltage tests beyond it are listed as
-   not run, with the reason.
+   not run, with the reason. No supply setpoint in any stage goes above
+   the input's rating in constraints `voltages[]` either: a VIN corner or
+   a first power above it is listed as not applied, and with no power-up
+   stage there is no full-function stage.
 
 Every measured step carries `expect` = {nominal, min, max, unit} and a
 `derived_from` string naming the design fact it came from (`constraints

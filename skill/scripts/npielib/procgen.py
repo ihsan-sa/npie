@@ -42,6 +42,9 @@ Every limit is derived from a design fact and says which one in the step's
   output-voltage trip by an open-loop duty aimed at OVP_OVERSHOOT x its
   threshold (below 97 % of the output net's rating), any other by a person
   injecting on its sense net through INJECT_R_OHM with an INJECT_ILIM_A limit.
+- no supply setpoint goes above the input's rating in constraints voltages[]:
+  a first power or a requirements VIN corner above it is listed as skipped,
+  not applied, and with no power-up stage nothing later sets the supply.
 - limits: the under-voltage trip is checked while switching at D0 when the
   firmware has a `pwm` block (it latches input trips only while switching),
   else with the bridge idle.
@@ -95,7 +98,6 @@ DUTY_MIN = 0.05
 DUTY_MAX_DEFAULT = 0.9      # a manifest pwm block with no max_duty
 OV_AIM_RATING_FRAC = 0.97   # an over-voltage aim stays under the output's rating
 VDDA_DEFAULT_V = 3.3        # an injection stops here with no /VDDA or +3V3 rail
-SPIN_V_DEFAULT = 12.0       # first spin without a power-up stage
 UV_UNDERSHOOT_V = 0.5       # the supply goes this far under the under-voltage trip
 
 EVN_HEADER_RE = re.compile(r"\bEVN JP8\b")
@@ -175,6 +177,16 @@ class _Builder:
         if key in self.d.bringup:
             return self.d.bringup[key], f"constraints bringup[{key}]"
         return default, f"procgen default {const}"
+
+    def over_rating(self, v: float) -> str | None:
+        """Why the supply can't be set to v: above the input's rating in
+        constraints voltages[] (requirements.md may give a wider range). None
+        when it can."""
+        rated = self.d.voltages.get(self.input)
+        if rated is not None and v > rated:
+            return (f"above the input rating constraints voltages[{_short(self.input)}] "
+                    f"{rated:g} V; not applied")
+        return None
 
     # ---- design analysis
 
@@ -374,6 +386,10 @@ class _Builder:
             v = round(d.voltages[self.input] * VIN_NO_RANGE_FRAC, 1)
             v_src = (f"no operating range in requirements: {VIN_NO_RANGE_FRAC:g}x "
                      f"constraints voltages[{_short(self.input)}]")
+        why = self.over_rating(v)
+        if why:
+            self.skip("power-up", f"first power at {v:g} V ({v_src}) is {why}")
+            return
         # the full load is the heaviest rail's, not the sum of them
         load_w, heavy = max(((r["v"] * self._rail_current(r["net"]), r["net"])
                              for r in self.rails if not r["follows_input"]), default=(0.0, None))
@@ -785,7 +801,12 @@ class _Builder:
                                        f"{(self.d.manifest or {}).get('stage', 'none')})")
             self.stages.pop()
             return
-        v = getattr(self, "v_first", SPIN_V_DEFAULT)
+        if not hasattr(self, "v_first"):
+            self.skip("full-function", "power-up stage was not generated: no supply "
+                                       "setpoint to spin at")
+            self.stages.pop()
+            return
+        v = self.v_first
         ilim, src = self.bench_limit("spin_current_a", SPIN_ILIMIT_A, "SPIN_ILIMIT_A")
         self.human("Motor connected to the phase outputs, shaft free and clamped. "
                    f"The next steps spin it at {v:g} V with a {ilim:g} A limit.")
@@ -811,11 +832,16 @@ class _Builder:
         self.stage("limits", "Operating range and protection")
         d = self.d
         if not d.vin_range or not hasattr(self, "v_first"):
-            self.skip("limits", "no operating range in requirements.md")
+            self.skip("limits", "no operating range in requirements.md" if not d.vin_range
+                      else "power-up stage was not generated")
             self.stages.pop()
             return
         lo, hi = d.vin_range
         for end, v in (("min", lo), ("max", hi)):
+            why = self.over_rating(v)
+            if why:
+                self.skip(f"limits:vin-{end}", f"requirements VIN {end} {v:g} V is {why}")
+                continue
             self.step("supply", role="psu", set={"v": v, "i_limit": self.ilim, "output": True},
                       derived_from=f"requirements VIN {end} {v:g} V")
             self.step("wait", seconds=1.0)
