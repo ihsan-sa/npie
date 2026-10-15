@@ -93,6 +93,15 @@ def _boost(ws: Path) -> None:
     mf.write_text(json.dumps(m))
 
 
+def _hall(ws: Path) -> None:
+    """Hall sensor nets on U1, so procgen emits the logic analyser step."""
+    net = ws / "kicad" / "mini-bldc.net"
+    hall = "".join(f'    (net (code "{900 + i}") (name "/HALL_{c}")\n'
+                   f'      (node (ref "U1") (pin "{20 + i}") (pintype "input")))\n'
+                   for i, c in enumerate("ABC"))
+    net.write_text(re.sub(r"(\(nets\s*\n)", lambda m: m.group(1) + hall, net.read_text(), count=1))
+
+
 @pytest.mark.parametrize("variant", [_mini_bldc, _no_manifest, _evn_header, _spin, _boost],
                          ids=["mini-bldc", "no-manifest", "evn-header", "spin", "boost"])
 def test_every_limit_names_its_design_input(tmp_path, variant):
