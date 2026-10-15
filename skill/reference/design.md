@@ -346,8 +346,13 @@ from `NPIE_LUALATEX` else PATH and the style from `NPIE_HOUSE_STYLE` else
 pdf-material-builder's skill dir. Without either, or when the compile fails,
 `report.pdf` is a plain one: the `.tex`'s words in Courier, captures named
 but not drawn, written in pure Python with a first line saying why, and the
-script exits 1. So every host leaves a PDF. `--tex-only` writes `report.tex`
-alone and exits 1.
+script exits 1. So every host leaves a PDF. Where `report.tex` itself can't
+be built (`procedure.json` missing or unreadable, or a bug in the builder),
+`report.pdf` is a plain one of what `run.json` alone says: the status, why
+it stopped, the safe state and each step's verdict, value and who confirmed
+it. Any earlier `report.tex` is removed, so none claims a status the run has
+left, and the script exits 1. Only a run dir with no readable `run.json`
+gets no PDF (exit 2). `--tex-only` writes `report.tex` alone and exits 1.
 
 `npie_run.py` calls the same builder whenever `start`, `confirm` or `resume`
 leaves a run, so no run goes unrecorded for want of someone asking: the
@@ -356,7 +361,8 @@ are and, if the PDF is the plain one, why. A run waiting on a person gets its
 PDF too, since it may never be resumed: the first page says it has not ended
 and what it waits on (a person at a named step, or a `resume` after one was
 confirmed), and the PDF is rebuilt as the run goes on. A report that fails to
-build is a warning, never the run's outcome.
+build is a warning, never the run's outcome, and still leaves the `run.json`
+PDF above.
 
 `shopping.py` reads the procedure, not the design: each instrument role the
 steps use, with the least spec those steps ask of it (supply volts, and amps
