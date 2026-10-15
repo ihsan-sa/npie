@@ -336,7 +336,9 @@ path, ASCII-only .tex): board and procedure identity (input hashes), a
 summary table per stage, every measured step with expect/actual/verdict
 (a console step's per-field limits included), each limit's `derived_from`,
 the human confirmations with who and when, and the scope captures as
-figures. A failed or incomplete run still gets a report, marked so on its
+figures. lualatex runs in the run dir and each capture is named from there,
+so the `.tex` holds nothing of the host path the board sits under (an
+accent, a space or a `%` in it). A failed or incomplete run still gets a report, marked so on its
 first page with the failed step and the safe state it left; a limit a person
 set in `bringup/overrides.yaml` is called out on the first page too, beside
 the generated one it replaced. lualatex comes
