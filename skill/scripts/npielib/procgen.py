@@ -8,8 +8,10 @@ Every limit is derived from a design fact and says which one in the step's
   and power-stage nets; without them 100 ohm and 1 kohm), diode mode 0.3-0.8 V
   across each FET body diode.
 - power-up: supply at VIN min + 2 V, current limit 2x the full-load estimate
-  capped at FIRST_ILIMIT_A; idle current between IDLE_FLOOR_A and 90 % of the
-  limit (a supply sitting in current limit is a fail).
+  capped at FIRST_ILIMIT_A; idle current between IDLE_FLOOR_A and
+  ILIM_CEIL_FRAC (90 %) of the limit (a supply sitting in current limit is a
+  fail). Every number in a limit is a module constant, named in the step's
+  derived_from (tests/test_npie_limit_fields.py nudges each one).
 - rails: nominal from constraints voltages[], +/-5 %, +/-8 % for a rail made
   through a catch diode (asynchronous converter); a rail rated like the input
   follows the supply setpoint (-5 %/+1 %). Ripple 2 % pk-pk on switched rails.
@@ -59,15 +61,25 @@ IDLE_FLOOR_A = 0.002
 EFFICIENCY = 0.8
 R_FLOOR_LOGIC = 100.0
 R_FLOOR_POWER = 1000.0
+ILIM_CEIL_FRAC = 0.9        # a supply at its current limit is in CC: a fail
 DIODE_V = (0.3, 0.8)
+DIODE_NOM_V = 0.5
 TOL_REG = 0.05
 TOL_ASYNC = 0.08
+FOLLOW_TOL = (0.05, 0.01)   # below, above the supply setpoint
+VBUS_READ_TOL = 0.05
+SENSE_REF_TOL = 0.03
 RIPPLE_FRAC = 0.02
+FREQ_TOL = 0.02
+BRIDGE_DUTY = 0.5
+BRIDGE_DUTY_TOL = 0.05
+HALL_EDGES_MIN = 2
 BOOST_IDLE_DROP_V = 3.0     # GaN reverse conduction, high side off
 VOUT_TOL_CLOSED = 0.05
 VOUT_TOL_OPEN = 0.10
 DUTY_TOL = 0.03
 DT_SKEW_NS = 2.0            # two probes' skew plus the scope's edge timing
+DT_ROUNDUP_NS = 1.0         # the timer rounds the dead time up
 OVP_OVERSHOOT = 1.05
 INJECT_R_OHM = 100
 INJECT_ILIM_A = 0.02
@@ -88,6 +100,11 @@ def _short(net: str) -> str:
 def _alive() -> str:
     """The idle-current floor's wording: something on the board draws current."""
     return f"above the {IDLE_FLOOR_A * 1000:g} mA alive floor"
+
+
+def _ceil(ilim: float) -> str:
+    """The current ceiling's wording: a supply in current limit is a fail."""
+    return f"below {ILIM_CEIL_FRAC * 100:g} % of the {ilim:g} A"
 
 
 class _Builder:
@@ -277,11 +294,12 @@ class _Builder:
                 self.probe("DMM", plus, minus, "diode")
                 self.step("measure", role="dmm", quantity="diode",
                           points={"plus": plus, "minus": minus},
-                          expect={"nominal": 0.5, "min": DIODE_V[0], "max": DIODE_V[1],
-                                  "unit": "V"},
+                          expect={"nominal": DIODE_NOM_V, "min": DIODE_V[0],
+                                  "max": DIODE_V[1], "unit": "V"},
                           derived_from=f"{fet} body diode (netlist S={_short(plus['net'])}, "
                                        f"D={_short(minus['net'])}): silicon forward drop "
-                                       f"{DIODE_V[0]:g}-{DIODE_V[1]:g} V",
+                                       f"{DIODE_V[0]:g}-{DIODE_V[1]:g} V, typically "
+                                       f"{DIODE_NOM_V:g} V",
                           text=f"{fet} body diode conducts one way")
 
     def host_link(self):
@@ -356,8 +374,8 @@ class _Builder:
         self.step("wait", seconds=1.0)
         self.step("measure", role="psu", quantity="current",
                   expect={"nominal": None, "min": IDLE_FLOOR_A,
-                          "max": round(0.9 * ilim, 4), "unit": "A"},
-                  derived_from=f"{_alive()}; below 90 % of the {ilim:g} A limit from "
+                          "max": round(ILIM_CEIL_FRAC * ilim, 4), "unit": "A"},
+                  derived_from=f"{_alive()}; {_ceil(ilim)} limit from "
                                "constraints power[] (not in CC)",
                   text="idle input current")
         self.human("Touch-test: no part is hot a few seconds after power-up.")
@@ -374,20 +392,22 @@ class _Builder:
             self.skip("rails", "power-up stage was not generated")
             return
         g = self.point(self.gnd)
+        below, above = FOLLOW_TOL
         for r in self.rails:
             p = self.point(r["net"])
             if r["boost_out"]:
                 nom = self.v_first
                 exp = {"nominal": nom, "min": round(nom - BOOST_IDLE_DROP_V, 3),
-                       "max": round(nom * 1.01, 3), "unit": "V"}
+                       "max": round(nom * (1 + above), 3), "unit": "V"}
                 src = (f"idle boost output follows the input through netlist "
-                       f"{self.boost['ic']}'s high side: setpoint -{BOOST_IDLE_DROP_V:g} V/+1 %")
+                       f"{self.boost['ic']}'s high side: setpoint -{BOOST_IDLE_DROP_V:g} V/"
+                       f"+{above * 100:g} %")
             elif r["follows_input"]:
                 nom = self.v_first
-                exp = {"nominal": nom, "min": round(nom * 0.95, 3),
-                       "max": round(nom * 1.01, 3), "unit": "V"}
+                exp = {"nominal": nom, "min": round(nom * (1 - below), 3),
+                       "max": round(nom * (1 + above), 3), "unit": "V"}
                 src = (f"follows the input (constraints voltages[] rated like "
-                       f"{_short(self.input)}): setpoint -5 %/+1 %")
+                       f"{_short(self.input)}): setpoint -{below * 100:g} %/+{above * 100:g} %")
             else:
                 tol = TOL_ASYNC if r["async"] else TOL_REG
                 nom = r["v"]
@@ -450,10 +470,11 @@ class _Builder:
         if st and "vbus_v" in st.get("reply_fields", []) and hasattr(self, "v_first"):
             v = self.v_first
             self.step("console", role="console", send="status", expect_re="^OK ",
-                      timeout_s=2, fields={"vbus_v": {"nominal": v, "min": round(v * 0.95, 3),
-                                                      "max": round(v * 1.05, 3), "unit": "V"}},
+                      timeout_s=2,
+                      fields={"vbus_v": {"nominal": v, "min": round(v * (1 - VBUS_READ_TOL), 3),
+                                         "max": round(v * (1 + VBUS_READ_TOL), 3), "unit": "V"}},
                       derived_from="manifest commands[status].reply_fields vbus_v "
-                                   "vs the supply setting +/-5%",
+                                   f"vs the supply setting +/-{VBUS_READ_TOL * 100:g}%",
                       text="firmware reads the input voltage")
         for u in d.refs("U"):
             f = {p["func"]: p["net"] for p in d.pins_of(u)}
@@ -466,11 +487,12 @@ class _Builder:
                 self.probe("DMM", p, g, "DC volts")
                 self.step("measure", role="dmm", quantity="voltage",
                           points={"plus": p, "minus": g},
-                          expect={"nominal": mid, "min": round(mid * 0.97, 3),
-                                  "max": round(mid * 1.03, 3), "unit": "V"},
+                          expect={"nominal": mid, "min": round(mid * (1 - SENSE_REF_TOL), 3),
+                                  "max": round(mid * (1 + SENSE_REF_TOL), 3), "unit": "V"},
                           derived_from=f"netlist {u} {d.value(u)} REF1={_short(f['REF1'])}, "
                                        f"REF2={_short(f['REF2'])}: zero-current output "
-                                       f"at the mean of their constraints voltages[] +/-3 %",
+                                       f"at the mean of their constraints voltages[] "
+                                       f"+/-{SENSE_REF_TOL * 100:g} %",
                           text=f"{u} sense-amp offset")
         leds = d.refs("D")
         leds = [r for r in leds if re.search(r"LED", d.value(r), re.I)]
@@ -499,8 +521,11 @@ class _Builder:
                        f"({', '.join(map(_short, hall))}) at {conn}; plug in the Hall "
                        "sensor and turn the motor slowly by hand during the capture.")
             self.step("logic", role="logic", channels=[_short(n) for n in hall],
-                      samplerate=1_000_000, duration_s=3.0, expect={"edges_min": 2},
-                      derived_from="netlist HALL_* nets", text="Hall inputs toggle")
+                      samplerate=1_000_000, duration_s=3.0,
+                      expect={"edges_min": HALL_EDGES_MIN},
+                      derived_from=f"netlist HALL_* nets: each toggles, at least "
+                                   f"{HALL_EDGES_MIN} edges while the motor turns",
+                      text="Hall inputs toggle")
         if self.boost:
             pass    # the power-stage stage switches it
         elif self.bridges and {"arm", "duty", "disarm"} <= set(cmds):
@@ -511,7 +536,7 @@ class _Builder:
                       timeout_s=2, derived_from="manifest commands[arm] safe:false")
             for i, b in enumerate(self.bridges):
                 duty = ["0"] * len(self.bridges)
-                duty[i] = "0.5"
+                duty[i] = f"{BRIDGE_DUTY:g}"
                 p = self.point(b["phase"])
                 self.step("console", role="console", send="duty " + " ".join(duty),
                           expect_re="^OK ", timeout_s=2,
@@ -519,17 +544,19 @@ class _Builder:
                 self.human(f"Scope channel 1 on {p['label']}, DC coupled, 10x probe.")
                 self.step("scope", role="scope", channel=1, quantity="duty",
                           points={"plus": p, "minus": g}, screenshot=True,
-                          expect={"nominal": 0.5, "min": 0.45, "max": 0.55, "unit": ""},
-                          derived_from="0.5 as commanded with manifest commands[duty], "
-                                       "+/-0.05",
+                          expect={"nominal": BRIDGE_DUTY,
+                                  "min": round(BRIDGE_DUTY - BRIDGE_DUTY_TOL, 3),
+                                  "max": round(BRIDGE_DUTY + BRIDGE_DUTY_TOL, 3), "unit": ""},
+                          derived_from=f"{BRIDGE_DUTY:g} as commanded with manifest "
+                                       f"commands[duty], +/-{BRIDGE_DUTY_TOL:g}",
                           text=f"{_short(b['phase'])} switches ({b['hs']}/{b['ls']})")
                 hz = (m.get("safety") or {}).get("pwm_hz")
                 if hz:
                     self.step("scope", role="scope", channel=1, quantity="freq",
                               points={"plus": p, "minus": g},
-                              expect={"nominal": float(hz), "min": hz * 0.98,
-                                      "max": hz * 1.02, "unit": "Hz"},
-                              derived_from="manifest safety.pwm_hz +/-2%",
+                              expect={"nominal": float(hz), "min": hz * (1 - FREQ_TOL),
+                                      "max": hz * (1 + FREQ_TOL), "unit": "Hz"},
+                              derived_from=f"manifest safety.pwm_hz +/-{FREQ_TOL * 100:g}%",
                               text=f"{_short(b['phase'])} PWM frequency")
             self.step("console", role="console", send="disarm", expect_re="^OK ",
                       timeout_s=2, derived_from="manifest commands[disarm]")
@@ -601,9 +628,9 @@ class _Builder:
                       text="the voltage loop regulates the output")
             self.step("measure", role="psu", quantity="current",
                       expect={"nominal": None, "min": IDLE_FLOOR_A,
-                              "max": round(0.9 * self.ilim, 4), "unit": "A"},
-                      derived_from=f"unloaded and regulating: {_alive()}, below 90 % of the "
-                                   f"{self.ilim:g} A limit from constraints power[]",
+                              "max": round(ILIM_CEIL_FRAC * self.ilim, 4), "unit": "A"},
+                      derived_from=f"unloaded and regulating: {_alive()}, "
+                                   f"{_ceil(self.ilim)} limit from constraints power[]",
                       text="input current while regulating")
             self.step("console", role="console", send="disarm", expect_re="^OK ",
                       timeout_s=2, derived_from="manifest commands[disarm]")
@@ -629,8 +656,9 @@ class _Builder:
         if hz:
             self.step("scope", role="scope", channel=1, quantity="freq",
                       points={"plus": lo, "minus": g},
-                      expect={"nominal": hz, "min": hz * 0.98, "max": hz * 1.02, "unit": "Hz"},
-                      derived_from="manifest pwm.freq_hz +/-2%",
+                      expect={"nominal": hz, "min": hz * (1 - FREQ_TOL),
+                              "max": hz * (1 + FREQ_TOL), "unit": "Hz"},
+                      derived_from=f"manifest pwm.freq_hz +/-{FREQ_TOL * 100:g}%",
                       text=f"{_short(lo['net'])} PWM frequency")
         self.step("scope", role="scope", channel=1, quantity="duty",
                   points={"plus": lo, "minus": g}, screenshot=True,
@@ -643,9 +671,10 @@ class _Builder:
             self.step("scope", role="scope", channel=1, channel2=2, quantity="deadtime",
                       points={"plus": lo, "minus": g, "ch2": hi}, screenshot=True,
                       expect={"nominal": float(dt), "min": round(dt - DT_SKEW_NS, 2),
-                              "max": round(dt + DT_SKEW_NS + 1.0, 2), "unit": "ns"},
+                              "max": round(dt + DT_SKEW_NS + DT_ROUNDUP_NS, 2), "unit": "ns"},
                       derived_from=f"manifest pwm.dead_time_ns {dt:g} ns: -{DT_SKEW_NS:g} ns "
-                                   f"probe skew, +{DT_SKEW_NS + 1:g} ns with the timer's round-up",
+                                   f"probe skew, +{DT_SKEW_NS + DT_ROUNDUP_NS:g} ns with the "
+                                   "timer's round-up",
                       text=f"dead time {_short(lo['net'])} falling to {_short(hi['net'])} rising")
         self.step("console", role="console", send="disarm", expect_re="^OK ", timeout_s=2,
                   derived_from="manifest commands[disarm]")
@@ -736,8 +765,8 @@ class _Builder:
         self.step("wait", seconds=3.0)
         self.step("measure", role="psu", quantity="current",
                   expect={"nominal": None, "min": IDLE_FLOOR_A,
-                          "max": round(0.9 * ilim, 3), "unit": "A"},
-                  derived_from=f"{src}: spinning, {_alive()}, below 90 % of the {ilim:g} A "
+                          "max": round(ILIM_CEIL_FRAC * ilim, 3), "unit": "A"},
+                  derived_from=f"{src}: spinning, {_alive()}, {_ceil(ilim)} "
                                "first-spin limit",
                   text="spin current")
         self.human("Confirm the motor turns smoothly without noise or stalls.")
@@ -759,9 +788,9 @@ class _Builder:
             self.step("wait", seconds=1.0)
             self.step("measure", role="psu", quantity="current",
                       expect={"nominal": None, "min": IDLE_FLOOR_A,
-                              "max": round(0.9 * self.ilim, 4), "unit": "A"},
+                              "max": round(ILIM_CEIL_FRAC * self.ilim, 4), "unit": "A"},
                       derived_from=f"idle current holds at requirements VIN {end} {v:g} V: "
-                                   f"{_alive()}, below 90 % of the {self.ilim:g} A limit "
+                                   f"{_alive()}, {_ceil(self.ilim)} limit "
                                    "from constraints power[]",
                       text=f"idle current at {v:g} V")
         saf = (d.manifest or {}).get("safety", {})
