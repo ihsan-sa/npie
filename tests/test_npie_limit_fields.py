@@ -60,7 +60,7 @@ UNDISCLOSED: set[tuple[str, str]] = set()
 # constants that shape no expect or fields (a console duty, a wait, a person's
 # instructions, a supply setting); the check holds them to moving no limit
 NOT_A_LIMIT = {"OVP_OVERSHOOT", "INJECT_R_OHM", "INJECT_ILIM_A", "TRIP_SETTLE_S",
-               "OV_AIM_RATING_FRAC", "VDDA_DEFAULT_V", "SPIN_V_DEFAULT", "UV_UNDERSHOOT_V"}
+               "OV_AIM_RATING_FRAC", "VDDA_DEFAULT_V", "UV_UNDERSHOOT_V"}
 # limit constants no fixture variant reaches yet, so nothing shows the limit
 # names them; add a variant that reaches one rather than listing it
 UNREACHED: set[str] = set()

@@ -43,7 +43,8 @@ interactive.
    saying what is about to happen. The runner turns the supply off on any
    failure after power-up.
 4. **Nothing above the rated input.** Limits tests stay inside the
-   requirements' operating range; a protection trip above it is listed as
+   requirements' operating range and the input's rating in constraints
+   `voltages[]`; a setpoint or protection trip above either is listed as
    not applied.
 5. **Regenerate after any design or firmware change.** The procedure
    carries its inputs' hashes and the runner refuses a stale one.
