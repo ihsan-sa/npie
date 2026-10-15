@@ -48,6 +48,7 @@ What has landed, from the git history (a line per PR). A proposed goal that clos
 - [#36](https://github.com/ihsan-sa/npie/pull/36) Write each run's report from npie_run.py when it stops
 - [#38](https://github.com/ihsan-sa/npie/pull/38) Close the limit-field goal in GOALS.md and add run notes
 - [#40](https://github.com/ihsan-sa/npie/pull/40) Run every generated step on the live drivers; add awg example
+- [#42](https://github.com/ihsan-sa/npie/pull/42) Check the bench host at every hardware door, not just Bench
 
 ### Every limit names its design input
 
@@ -82,4 +83,11 @@ What has landed, from the git history (a line per PR). A proposed goal that clos
 - **Serves:** Safe anywhere
 - **Done when:** `make check VENV=/home/dispatch-w-npie/venvs/npie` passes with `tests/test_npie_bench_guard.py` building every driver in `instruments.LIVE` directly, not through `Bench`, from its line in procedure_gen's `BENCH_EXAMPLE`, with `NPIE_BENCH_HOST` unset and pyvisa, pyserial, `subprocess.run` and `shutil.which` faked to fail the test if touched, and finding each one refused with a `BenchError` naming `NPIE_BENCH_HOST`; and with the same file finding, by reading the source of every script under `skill/scripts`, that each call that opens a transport (`open_resource`, `serial.Serial`, `subprocess.run`/`Popen`) sits in a function that calls `_bench_host` before it, except those named in its `NOT_HARDWARE` list (the report's lualatex).
 - **Status:** done
-- **Pull requests:** the PR from `dispatch/41` (before it, only `Bench.role` checked `NPIE_BENCH_HOST`; the drivers opened VISA, serial, sigrok-cli and the flash tool with no check, so a driver built any other way, as tests already do, skipped it. Now `_visa`, a new `_serial`, `SigrokLogic` and `SwdProbe` call `instruments._bench_host` first, and `Bench.role` uses the same check. With the `SwdProbe.flash` check removed, two of the new tests fail).
+- **Pull requests:** [#42](https://github.com/ihsan-sa/npie/pull/42) (before it, only `Bench.role` checked `NPIE_BENCH_HOST`; the drivers opened VISA, serial, sigrok-cli and the flash tool with no check, so a driver built any other way, as tests already do, skipped it. Now `_visa`, a new `_serial`, `SigrokLogic` and `SwdProbe` call `instruments._bench_host` first, and `Bench.role` uses the same check. With the `SwdProbe.flash` check removed, two of the new tests fail).
+
+### No run is left without its report
+
+- **Serves:** Every run on record
+- **Done when:** `make check VENV=/home/dispatch-w-npie/venvs/npie` passes with `tests/test_npie_run_orphans.py` driving `npie_run.py` into each way it can stop once a run dir may exist (a `rail:` fault with no volts, a bench that can't be built, Ctrl-C mid-step at start and at resume) and finding each one refused before any run dir exists, or its run aborted with `report.tex` written, the interrupted ones with `safe_state` saying the supply went off and exit 130; and, after every case, no run dir under `bringup/runs` that is still `running` or has no `report.tex`.
+- **Status:** done
+- **Pull requests:** the PR from `dispatch/43` (before it, `--fault rail:+5V=abc` passed `create`, made a run dir and then crashed building the `SimBoard`; a bench that failed to build did the same, since it was opened outside `advance`'s try; and Ctrl-C, not an `Exception`, went past the abort, so the run stayed `running` with no report and, on a real bench, its supply on. Now `create` refuses the fault, `advance` opens the bench inside its try, and an interrupt aborts the run, turns the supply off and saves it before `npie_run.py` writes the report and exits 130. With the interrupt handler removed, both Ctrl-C tests fail).

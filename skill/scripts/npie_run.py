@@ -21,8 +21,9 @@ simulated fault (short:<net>, rail:<net>=<V>, no-banner, no-flash).
 which only the bench host sets (reference/bench-hosts.md): the box never
 opens an instrument.
 
-On any failed step or instrument error the supply outputs go off before the
-run stops. Whenever start, confirm or resume leaves a run, it writes the
+On any failed step, instrument error, bench that can't be built or Ctrl-C the
+supply outputs go off before the run stops (Ctrl-C aborts it, exit 130), so
+no run is left "running" behind a dead process. Whenever start, confirm or resume leaves a run, it writes the
 run's report (npie_report.py): report.tex every time, and report.pdf too once
 the run has ended (passed, failed or aborted), so every run is on record. A
 report that cannot be built is a warning under "report", never the run's
@@ -85,6 +86,7 @@ def main(argv=None) -> int:
         sub.add_parser(name).add_argument("--run", required=True)
     a = ap.parse_args(argv)
 
+    run = None
     try:
         if a.cmd == "start":
             if not a.dry_run and (a.hold or a.fault):
@@ -99,8 +101,7 @@ def main(argv=None) -> int:
             run = runner.create(Path(a.workspace), bench="sim" if a.dry_run else
                                 cfg.get("bench", "bench"), bench_cfg=cfg, label=a.label,
                                 faults=a.fault, hold=a.hold, seed=a.seed)
-            run.open_bench(cfg)
-            runner.advance(run)
+            runner.advance(run)     # opens the bench, so a bench that can't be built aborts
         else:
             run = runner.Run(Path(a.run))
             if not run.sim and os.environ.get("NPIE_BENCH_HOST") != "1":
@@ -114,6 +115,12 @@ def main(argv=None) -> int:
                 runner.advance(run)
     except (runner.RunError, design.DesignError, OSError, yaml.YAMLError) as exc:
         return _out({"ok": False, "error": str(exc)}, 2)
+    except KeyboardInterrupt:
+        if run is None or run.rec["status"] != "aborted":
+            raise
+        out = runner.summary(run)      # advance turned the supply off and saved the run
+        out["report"] = _report(run)
+        return _out(out, 130)
     out = runner.summary(run)
     if a.cmd != "status":
         out["report"] = _report(run)

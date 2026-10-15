@@ -155,6 +155,11 @@ def create(ws: Path, *, bench: str, bench_cfg: dict | None, label: str | None,
     for f in faults or []:
         kind, _, arg = f.partition(":")
         net = arg.rsplit("=", 1)[0] if kind == "rail" else arg
+        if kind == "rail":
+            try:
+                float(arg.rsplit("=", 1)[1])
+            except (IndexError, ValueError):
+                raise RunError(f"--fault {f!r}: a rail fault is rail:<net>=<volts>") from None
         if f in ("no-banner", "no-flash") or (kind in ("short", "rail") and net in probed):
             continue
         raise RunError(f"--fault {f!r}: not a known fault, or names a net no step probes "
@@ -284,9 +289,9 @@ def advance(run: Run) -> Run:
         raise RunError(f"run is {run.rec['status']}; start a new one")
     auto = run.sim and not run.rec.get("hold")
     run.rec["status"] = "running"
-    if run.bench is None:
-        run.open_bench()
     try:
+        if run.bench is None:     # inside the try: a bench that can't be built aborts the run
+            run.open_bench()
         for s in run.steps[run.index(run.rec["cursor"]):]:
             run.rec["cursor"] = s["id"]
             if s["type"] == "human":
@@ -317,6 +322,10 @@ def advance(run: Run) -> Run:
         run.rec["error"] = f"{run.rec['cursor']}: {type(exc).__name__}: {exc}"
         run.finish("aborted", "error")
         return run
+    except KeyboardInterrupt:    # Ctrl-C mid-step: supply off and on record, then stop
+        run.rec["error"] = f"{run.rec['cursor']}: interrupted"
+        run.finish("aborted", "interrupted")
+        raise
     finally:
         run.save()
         run.keep_sim()
